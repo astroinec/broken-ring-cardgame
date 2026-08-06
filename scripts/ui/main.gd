@@ -1,0 +1,538 @@
+extends Control
+
+
+const CombatModelScript: Script = preload("res://scripts/core/combat_model.gd")
+const RunModelScript: Script = preload("res://scripts/core/run_model.gd")
+
+var model: CombatModel
+var run_model: RunModel
+var current_stage: int = CombatModel.TUTORIAL_STAGE_MIN
+var is_test_mode: bool = false
+var screen_root: MarginContainer
+var page: VBoxContainer
+var hand_box: HBoxContainer
+var log_view: RichTextLabel
+var result_label: Label
+var result_action_button: Button
+var end_turn_button: Button
+
+
+func _ready() -> void:
+	_configure_chinese_font()
+	_build_shell()
+	_show_main_menu()
+
+
+func _configure_chinese_font() -> void:
+	var chinese_font: Font = load("res://assets/fonts/NotoSansSC-Variable.ttf") as Font
+	if chinese_font == null:
+		push_warning("未能加载项目内置中文字体，将使用Godot默认字体回退。")
+		return
+	var ui_theme: Theme = Theme.new()
+	ui_theme.default_font = chinese_font
+	ui_theme.default_font_size = 18
+	theme = ui_theme
+
+
+func _build_shell() -> void:
+	var background: ColorRect = ColorRect.new()
+	background.color = Color("111722")
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(background)
+	screen_root = MarginContainer.new()
+	screen_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	screen_root.add_theme_constant_override("margin_left", 20)
+	screen_root.add_theme_constant_override("margin_top", 12)
+	screen_root.add_theme_constant_override("margin_right", 20)
+	screen_root.add_theme_constant_override("margin_bottom", 12)
+	add_child(screen_root)
+
+
+func _clear_screen() -> void:
+	for child: Node in screen_root.get_children():
+		screen_root.remove_child(child)
+		child.queue_free()
+
+
+func _show_main_menu() -> void:
+	is_test_mode = false
+	_clear_screen()
+	var menu: VBoxContainer = VBoxContainer.new()
+	menu.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu.add_theme_constant_override("separation", 22)
+	screen_root.add_child(menu)
+	_add_page_title(menu, "断环", "无字之城 / 序章原型")
+	var premise: Label = Label.new()
+	premise.text = "第七名回收者在码头醒来。机构要求你进入正在坍缩的无字之城，取回一枚“定义律印”。\n墙上的返航名单被墨迹覆盖；最下面一行，像是你自己的笔迹。"
+	premise.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	premise.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	premise.add_theme_font_size_override("font_size", 21)
+	premise.add_theme_color_override("font_color", Color("d8e0e7"))
+	menu.add_child(premise)
+	var start_button: Button = Button.new()
+	start_button.text = "进入无字之城"
+	start_button.custom_minimum_size = Vector2(360, 62)
+	start_button.pressed.connect(_restart_run)
+	menu.add_child(start_button)
+	var test_button: Button = Button.new()
+	test_button.text = "机制测试场"
+	test_button.custom_minimum_size = Vector2(360, 52)
+	test_button.tooltip_text = "独立于主线，集中体验当前已实现的核心牌组机制。"
+	test_button.pressed.connect(_start_test_level)
+	menu.add_child(test_button)
+	var note: Label = Label.new()
+	note.text = "主线机制会随路径、敌人与获得的残页自然出现；测试场不计入故事。"
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.add_theme_color_override("font_color", Color("8295a8"))
+	menu.add_child(note)
+
+
+func _restart_run() -> void:
+	is_test_mode = false
+	run_model = RunModelScript.new()
+	run_model.start_run(RunModel.DEFAULT_SEED)
+	current_stage = CombatModel.TUTORIAL_STAGE_MIN
+	_start_current_battle()
+
+
+func _start_test_level() -> void:
+	is_test_mode = true
+	run_model = RunModelScript.new()
+	run_model.start_run(RunModel.DEFAULT_SEED)
+	current_stage = CombatModel.TUTORIAL_STAGE_MAX
+	_start_current_battle()
+
+
+func _start_current_battle() -> void:
+	model = CombatModelScript.new()
+	model.start_battle(CombatModel.DEFAULT_SEED + current_stage, current_stage, run_model.get_acquired_card_ids())
+	_build_combat_screen()
+	_refresh_combat()
+
+
+func _build_combat_screen() -> void:
+	_clear_screen()
+	page = VBoxContainer.new()
+	page.add_theme_constant_override("separation", 8)
+	screen_root.add_child(page)
+
+	var header: HBoxContainer = HBoxContainer.new()
+	page.add_child(header)
+	var title: Label = Label.new()
+	title.text = "断环  /  机制测试场" if is_test_mode else "断环  /  无字之城"
+	title.add_theme_font_size_override("font_size", 25)
+	title.add_theme_color_override("font_color", Color("e7d9b5"))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var stage_label: Label = Label.new()
+	stage_label.text = "独立测试 / 不计入远征" if is_test_mode else model.get_stage_progress_text()
+	stage_label.add_theme_font_size_override("font_size", 20)
+	stage_label.add_theme_color_override("font_color", Color("ffd27d"))
+	header.add_child(stage_label)
+
+	var hint_label: Label = Label.new()
+	hint_label.text = "测试说明｜稳定度、超载、封存、回响与缺名均已开放。" if is_test_mode else "现场记录｜%s" % model.tutorial_hint
+	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint_label.add_theme_font_size_override("font_size", 16)
+	hint_label.add_theme_color_override("font_color", Color("a9bdd0"))
+	page.add_child(hint_label)
+
+	var stats_panel: PanelContainer = PanelContainer.new()
+	stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("182332"), Color("40566e"), 8))
+	page.add_child(stats_panel)
+	var stats: HBoxContainer = HBoxContainer.new()
+	stats.add_theme_constant_override("separation", 24)
+	stats_panel.add_child(stats)
+	_add_stat(stats, "生命", "%d / %d" % [model.player_hp, CombatModel.PLAYER_MAX_HP])
+	_add_stat(stats, "稳定度", "%d / %d" % [model.energy, CombatModel.BASE_ENERGY])
+	_add_stat(stats, "格挡", str(model.player_block))
+	_add_stat(stats, "不稳定", "%d / %d" % [model.instability, CombatModel.INSTABILITY_THRESHOLD] if model.is_mechanic_unlocked(&"overload") else "读数稳定")
+	_add_stat(stats, "牌堆", "抽%d 弃%d 逝%d" % [model.draw_pile.size(), model.discard_pile.size(), model.exhausted_zone.size()])
+	_add_stat(stats, "远征", "牌%d 墨晶%d" % [run_model.deck_instances.size(), run_model.ink_crystals])
+
+	var middle: HBoxContainer = HBoxContainer.new()
+	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	middle.add_theme_constant_override("separation", 12)
+	page.add_child(middle)
+	var enemy_panel: PanelContainer = PanelContainer.new()
+	enemy_panel.custom_minimum_size = Vector2(430, 185)
+	enemy_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	enemy_panel.add_theme_stylebox_override("panel", _panel_style(Color("291b24"), Color("8c5367"), 12))
+	middle.add_child(enemy_panel)
+	var enemy_column: VBoxContainer = VBoxContainer.new()
+	enemy_column.alignment = BoxContainer.ALIGNMENT_CENTER
+	enemy_column.add_theme_constant_override("separation", 9)
+	enemy_panel.add_child(enemy_column)
+	_add_centered(enemy_column, model.enemy_name, 28, Color("f2bdc8"))
+	_add_centered(enemy_column, "生命 %d/%d　格挡 %d" % [model.enemy_hp, model.enemy_max_hp, model.enemy_block], 18, Color("e4d4d8"))
+	if model.is_mechanic_unlocked(&"missing_name"):
+		_add_centered(enemy_column, "%s｜%s" % [model.get_enemy_record_text(), model.get_missing_name_text()], 16, Color("e0a9ba"))
+	if model.is_mechanic_unlocked(&"intent"):
+		_add_centered(enemy_column, "下一意图 / %s" % model.get_enemy_intent_text(), 20, Color("ffd27d"))
+
+	var info_panel: PanelContainer = PanelContainer.new()
+	info_panel.custom_minimum_size = Vector2(560, 185)
+	info_panel.add_theme_stylebox_override("panel", _panel_style(Color("151e29"), Color("33485f"), 8))
+	middle.add_child(info_panel)
+	var info_column: VBoxContainer = VBoxContainer.new()
+	info_panel.add_child(info_column)
+	var log_title: Label = Label.new()
+	log_title.text = "战斗日志"
+	log_title.add_theme_color_override("font_color", Color("b8c9db"))
+	info_column.add_child(log_title)
+	log_view = RichTextLabel.new()
+	log_view.scroll_following = true
+	log_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	log_view.add_theme_font_size_override("normal_font_size", 15)
+	log_view.add_theme_color_override("default_color", Color("b9c4cf"))
+	info_column.add_child(log_view)
+
+	var zone_row: HBoxContainer = HBoxContainer.new()
+	page.add_child(zone_row)
+	var hand_title: Label = Label.new()
+	hand_title.text = "手牌（点击打出）"
+	hand_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hand_title.add_theme_color_override("font_color", Color("d7c9a9"))
+	zone_row.add_child(hand_title)
+	var sealed_label: Label = Label.new()
+	sealed_label.text = "封存区：%s" % model.get_sealed_summary() if model.is_mechanic_unlocked(&"seal") else "封存区：尚无记录"
+	sealed_label.add_theme_color_override("font_color", Color("c5a4df"))
+	zone_row.add_child(sealed_label)
+
+	var hand_scroll: ScrollContainer = ScrollContainer.new()
+	hand_scroll.custom_minimum_size = Vector2(0, 145)
+	hand_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	page.add_child(hand_scroll)
+	hand_box = HBoxContainer.new()
+	hand_box.add_theme_constant_override("separation", 10)
+	hand_scroll.add_child(hand_box)
+
+	var footer: HBoxContainer = HBoxContainer.new()
+	page.add_child(footer)
+	result_label = Label.new()
+	result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_label.add_theme_color_override("font_color", Color("9cafc2"))
+	footer.add_child(result_label)
+	var restart_button: Button = Button.new()
+	restart_button.text = "返回标题" if is_test_mode else "重新开始远征"
+	restart_button.pressed.connect(_on_restart_pressed)
+	footer.add_child(restart_button)
+	result_action_button = Button.new()
+	result_action_button.visible = false
+	result_action_button.pressed.connect(_on_battle_result_pressed)
+	footer.add_child(result_action_button)
+	end_turn_button = Button.new()
+	end_turn_button.text = "结束回合"
+	end_turn_button.custom_minimum_size = Vector2(140, 44)
+	end_turn_button.pressed.connect(_on_end_turn_pressed)
+	footer.add_child(end_turn_button)
+
+
+func _refresh_combat() -> void:
+	_build_combat_screen()
+	for index: int in range(model.hand.size()):
+		var card: CardData = model.hand[index]
+		var button: Button = Button.new()
+		var cost: int = model.get_card_cost(card)
+		button.custom_minimum_size = Vector2(184, 135)
+		button.text = "%s
+[%s·%s] 费用%d
+
+%s" % [card.title, card.type_name(), card.rarity, cost, card.description]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.tooltip_text = "%s
+
+%s" % [card.flavor_text, card.description]
+		button.disabled = model.battle_over or cost > model.energy
+		button.add_theme_font_size_override("font_size", 15)
+		button.add_theme_stylebox_override("normal", _card_style(card.card_type, false))
+		button.add_theme_stylebox_override("hover", _card_style(card.card_type, true))
+		button.pressed.connect(_on_card_pressed.bind(index))
+		hand_box.add_child(button)
+	var joined_log: String = ""
+	for entry: String in model.log_entries:
+		joined_log += entry + "\n"
+	log_view.text = joined_log
+	end_turn_button.disabled = model.battle_over
+	if model.battle_over:
+		result_action_button.visible = true
+		if model.victory:
+			result_label.text = "测试完成。" if is_test_mode else "战斗胜利。结算后继续深入。"
+			result_label.add_theme_color_override("font_color", Color("8ed5a6"))
+			result_action_button.text = "返回标题" if is_test_mode else "查看战果"
+		else:
+			result_label.text = "战斗失败，可重试当前场。"
+			result_label.add_theme_color_override("font_color", Color("e58c95"))
+			result_action_button.text = "重试当前场"
+	else:
+		result_action_button.visible = false
+		result_label.text = "第%d回合｜每回合3稳定度" % model.turn_number
+
+
+func _on_restart_pressed() -> void:
+	if is_test_mode:
+		_show_main_menu()
+	else:
+		_restart_run()
+
+
+func _on_card_pressed(hand_index: int) -> void:
+	model.play_card(hand_index)
+	_refresh_combat()
+
+
+func _on_end_turn_pressed() -> void:
+	model.end_player_turn()
+	_refresh_combat()
+
+
+func _on_battle_result_pressed() -> void:
+	if not model.victory:
+		_start_current_battle()
+		return
+	if is_test_mode:
+		_show_main_menu()
+		return
+	run_model.player_hp = model.player_hp
+	run_model.record_battle_victory(current_stage)
+	if run_model.should_offer_reward(current_stage):
+		run_model.generate_reward_choices(current_stage)
+		_show_reward_screen()
+	else:
+		_advance_after_interlude()
+
+
+func _show_reward_screen() -> void:
+	_clear_screen()
+	var reward_page: VBoxContainer = VBoxContainer.new()
+	reward_page.add_theme_constant_override("separation", 18)
+	screen_root.add_child(reward_page)
+	_add_page_title(reward_page, "战后回收", "选择一张残页加入牌组，也可以跳过。")
+	var summary: Label = Label.new()
+	summary.text = run_model.get_summary_text()
+	summary.add_theme_color_override("font_color", Color("9cafc2"))
+	reward_page.add_child(summary)
+	var cards: HBoxContainer = HBoxContainer.new()
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 18)
+	cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	reward_page.add_child(cards)
+	for index: int in range(run_model.pending_reward_ids.size()):
+		var card_id: StringName = run_model.pending_reward_ids[index]
+		var definition: Dictionary = CardCatalog.get_definition(card_id)
+		var button: Button = Button.new()
+		button.custom_minimum_size = Vector2(300, 300)
+		button.text = "%s
+[%s] 费用%d
+
+%s
+
+——
+%s" % [
+			definition[&"title"], definition[&"rarity"], definition[&"cost"],
+			definition[&"description"], definition[&"flavor"],
+		]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.pressed.connect(_on_reward_chosen.bind(index))
+		cards.add_child(button)
+	var skip: Button = Button.new()
+	skip.text = "跳过奖励"
+	skip.custom_minimum_size = Vector2(180, 48)
+	skip.pressed.connect(_on_reward_skipped)
+	reward_page.add_child(skip)
+
+
+func _on_reward_chosen(index: int) -> void:
+	if run_model.choose_reward(index):
+		_advance_after_interlude()
+
+
+func _on_reward_skipped() -> void:
+	if run_model.skip_reward():
+		_advance_after_interlude()
+
+
+func _advance_after_interlude() -> void:
+	if current_stage < CombatModel.TUTORIAL_STAGE_MAX:
+		current_stage += 1
+		_show_path_transition()
+	else:
+		run_model.begin_event()
+		_show_event_screen()
+
+
+func _show_path_transition() -> void:
+	_clear_screen()
+	var transition: VBoxContainer = VBoxContainer.new()
+	transition.alignment = BoxContainer.ALIGNMENT_CENTER
+	transition.add_theme_constant_override("separation", 22)
+	screen_root.add_child(transition)
+	var data: Dictionary = _get_path_transition_data(current_stage)
+	_add_page_title(transition, str(data[&"title"]), "无字之城 / 路径记录")
+	var body: Label = Label.new()
+	body.text = str(data[&"body"])
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_theme_font_size_override("font_size", 22)
+	body.add_theme_color_override("font_color", Color("d8e0e7"))
+	transition.add_child(body)
+	var proceed: Button = Button.new()
+	proceed.text = "继续前行"
+	proceed.custom_minimum_size = Vector2(260, 54)
+	proceed.pressed.connect(_start_current_battle)
+	transition.add_child(proceed)
+
+
+func _get_path_transition_data(stage: int) -> Dictionary:
+	match stage:
+		2:
+			return {&"title": "街口的石片", &"body": "码头之后没有路标。守卫胸前的石片却会在动作发生前亮起，像一段被迫公开的念头。"}
+		3:
+			return {&"title": "井下蓝光", &"body": "一张陌生残页从测量井边缘自行脱落。握住它时，你第一次听见体内传来裂纹扩张的声音。"}
+		4:
+			return {&"title": "迟到的钟声", &"body": "长廊里的钟总在重锤落下之后才响。散落的文字却提前排列成防线，等待尚未到来的那一击。"}
+		5:
+			return {&"title": "第二个声音", &"body": "阅览室无人应答。你挥动武器，书架深处却完整复述了一次相同的动作。"}
+		6:
+			return {&"title": "被吞下的字", &"body": "越靠近巢穴，墙上的词越少。虫腹里滚动着失踪的字，其中一个与你的编号形状相同。"}
+	return {&"title": "继续深入", &"body": "路径仍在向城内延伸。"}
+
+
+func _show_event_screen() -> void:
+	_clear_screen()
+	var event_page: VBoxContainer = VBoxContainer.new()
+	event_page.add_theme_constant_override("separation", 18)
+	screen_root.add_child(event_page)
+	_add_page_title(event_page, run_model.get_event_title(), "纪元残骸 / 异常记录")
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _panel_style(Color("171f2b"), Color("536980"), 12))
+	event_page.add_child(panel)
+	var story: Label = Label.new()
+	story.text = run_model.get_event_story()
+	story.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	story.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	story.add_theme_font_size_override("font_size", 22)
+	story.add_theme_color_override("font_color", Color("d8e0e7"))
+	panel.add_child(story)
+	var options: VBoxContainer = VBoxContainer.new()
+	options.add_theme_constant_override("separation", 10)
+	event_page.add_child(options)
+	var option_data: Array[Dictionary] = run_model.get_event_options()
+	for index: int in range(option_data.size()):
+		var option: Dictionary = option_data[index]
+		var button: Button = Button.new()
+		button.text = "%s｜%s" % [option[&"label"], option[&"consequence"]]
+		button.disabled = not bool(option[&"enabled"])
+		button.tooltip_text = str(option[&"reason"])
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.custom_minimum_size = Vector2(0, 58)
+		button.pressed.connect(_on_event_choice.bind(index))
+		options.add_child(button)
+
+
+func _on_event_choice(index: int) -> void:
+	if run_model.apply_event_choice(index):
+		_show_summary_screen()
+
+
+func _show_summary_screen() -> void:
+	_clear_screen()
+	var summary_page: VBoxContainer = VBoxContainer.new()
+	summary_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	summary_page.add_theme_constant_override("separation", 22)
+	screen_root.add_child(summary_page)
+	_add_page_title(summary_page, "序章记录封存", "你带回了一些答案，也带回了更多问题。")
+	var outcome: Label = Label.new()
+	outcome.text = run_model.event_outcome
+	outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	outcome.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outcome.add_theme_font_size_override("font_size", 22)
+	outcome.add_theme_color_override("font_color", Color("d9c7a5"))
+	summary_page.add_child(outcome)
+	var summary: Label = Label.new()
+	summary.text = run_model.get_summary_text()
+	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	summary.add_theme_color_override("font_color", Color("9cafc2"))
+	summary_page.add_child(summary)
+	if not run_model.evidence.is_empty():
+		var evidence_label: Label = Label.new()
+		evidence_label.text = "已记录证据：%s" % "、".join(run_model.evidence)
+		evidence_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		evidence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		summary_page.add_child(evidence_label)
+	var restart: Button = Button.new()
+	restart.text = "以相同种子重新远征"
+	restart.custom_minimum_size = Vector2(240, 50)
+	restart.pressed.connect(_restart_run)
+	summary_page.add_child(restart)
+
+
+func _add_page_title(parent: VBoxContainer, heading: String, subtitle: String) -> void:
+	var title: Label = Label.new()
+	title.text = heading
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 32)
+	title.add_theme_color_override("font_color", Color("e7d9b5"))
+	parent.add_child(title)
+	var sub: Label = Label.new()
+	sub.text = subtitle
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_color_override("font_color", Color("9cafc2"))
+	parent.add_child(sub)
+
+
+func _add_stat(parent: HBoxContainer, title: String, value: String) -> void:
+	var box: VBoxContainer = VBoxContainer.new()
+	box.custom_minimum_size = Vector2(170, 52)
+	parent.add_child(box)
+	var title_label: Label = Label.new()
+	title_label.text = title
+	title_label.add_theme_font_size_override("font_size", 13)
+	title_label.add_theme_color_override("font_color", Color("7f96aa"))
+	box.add_child(title_label)
+	var value_label: Label = Label.new()
+	value_label.text = value
+	value_label.add_theme_font_size_override("font_size", 19)
+	value_label.add_theme_color_override("font_color", Color("e4ebf1"))
+	box.add_child(value_label)
+
+
+func _add_centered(parent: VBoxContainer, text: String, size: int, color: Color) -> void:
+	var label: Label = Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", size)
+	label.add_theme_color_override("font_color", color)
+	parent.add_child(label)
+
+
+func _panel_style(fill: Color, border: Color, radius: int) -> StyleBoxFlat:
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = fill
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(radius)
+	style.content_margin_left = 16.0
+	style.content_margin_top = 12.0
+	style.content_margin_right = 16.0
+	style.content_margin_bottom = 12.0
+	return style
+
+
+func _card_style(card_type: int, hovered: bool) -> StyleBoxFlat:
+	var fill: Color
+	var border: Color
+	match card_type:
+		CardData.CardType.ATTACK:
+			fill = Color("4a2630") if not hovered else Color("65333f")
+			border = Color("c56d79")
+		CardData.CardType.DEFENSE:
+			fill = Color("20394d") if not hovered else Color("2c4d68")
+			border = Color("69a7c7")
+		_:
+			fill = Color("392d4c") if not hovered else Color("4d3b67")
+			border = Color("a98bd1")
+	return _panel_style(fill, border, 9)

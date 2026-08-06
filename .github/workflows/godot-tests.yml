@@ -1,0 +1,50 @@
+name: Godot tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.7.1"
+  GODOT_ARCHIVE: "Godot_v4.7.1-stable_linux.x86_64.zip"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download official Godot build
+        shell: bash
+        run: |
+          curl --fail --location --retry 4 --retry-all-errors \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/${GODOT_ARCHIVE}" \
+            --output /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          chmod +x "/tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          echo "GODOT_BIN=/tmp/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> "$GITHUB_ENV"
+
+      - name: Import project and parse scripts
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --editor --quit'
+
+      - name: Run combat tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_combat.gd'
+
+      - name: Run run and event tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_run.gd'
+
+      - name: Run route flow tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_flow.gd'
+
+      - name: Run Chinese font tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_chinese_font.gd'
+
+      - name: Smoke-test main scene
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --quit-after 8'
