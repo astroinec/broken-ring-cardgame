@@ -151,17 +151,32 @@ static func get_definition(card_id: StringName) -> Dictionary:
 	return definition.duplicate(true)
 
 
-static func create_card(card_id: StringName, instance_id: int) -> CardData:
+static func create_card(
+	card_id: StringName, instance_id: int, upgrade_id: StringName = &""
+) -> CardData:
 	var definition: Dictionary = DEFINITIONS.get(card_id, {})
 	assert(not definition.is_empty(), "未知卡牌定义：%s" % card_id)
+	var title: String = str(definition[&"title"])
+	var cost: int = int(definition[&"cost"])
+	var description: String = str(definition[&"description"])
+	var modifiers: Dictionary = {}
+	if upgrade_id != &"":
+		var upgrade: Dictionary = CardUpgradeCatalog.get_upgrade(card_id, upgrade_id)
+		assert(not upgrade.is_empty(), "未知卡牌升级：%s/%s" % [card_id, upgrade_id])
+		title += str(upgrade[&"title_suffix"])
+		description = str(upgrade[&"description"])
+		modifiers = (upgrade[&"modifiers"] as Dictionary).duplicate(true)
+		cost = int(modifiers.get(&"cost", cost))
 	return CardData.new(
 		instance_id,
 		card_id,
-		str(definition[&"title"]),
+		title,
 		int(definition[&"type"]) as CardData.CardType,
-		int(definition[&"cost"]),
-		str(definition[&"description"]),
+		cost,
+		description,
 		bool(definition.get(&"exhausts", false)),
 		str(definition[&"rarity"]),
-		str(definition[&"flavor"])
+		str(definition[&"flavor"]),
+		upgrade_id,
+		modifiers
 	)

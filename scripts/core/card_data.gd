@@ -18,6 +18,8 @@ var description: String
 var rarity: String
 var flavor_text: String
 var exhausts: bool
+var upgrade_id: StringName = &""
+var modifiers: Dictionary = {}
 var temporary: bool = false
 var sealed_turns: int = -1
 var cost_override_this_turn: int = -1
@@ -32,7 +34,9 @@ func _init(
 	p_description: String,
 	p_exhausts: bool = false,
 	p_rarity: String = "基础",
-	p_flavor_text: String = ""
+	p_flavor_text: String = "",
+	p_upgrade_id: StringName = &"",
+	p_modifiers: Dictionary = {}
 ) -> void:
 	instance_id = p_instance_id
 	id = p_id
@@ -43,6 +47,12 @@ func _init(
 	exhausts = p_exhausts
 	rarity = p_rarity
 	flavor_text = p_flavor_text
+	upgrade_id = p_upgrade_id
+	modifiers = p_modifiers.duplicate(true)
+
+
+func value(key: StringName, fallback: int) -> int:
+	return int(modifiers.get(key, fallback))
 
 
 func type_name() -> String:

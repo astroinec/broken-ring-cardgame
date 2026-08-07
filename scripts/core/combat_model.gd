@@ -26,6 +26,7 @@ var next_instance_id: int = 1
 var rule_engine: RuleEngine = RuleEngine.new()
 
 var player_hp: int = PLAYER_MAX_HP
+var player_max_hp: int = PLAYER_MAX_HP
 var player_block: int = 0
 var energy: int = BASE_ENERGY
 var instability: int = 0
@@ -72,6 +73,7 @@ var _telemetry_card_uses: Dictionary = {}
 
 var last_card_type: int = -1
 var last_card_id: StringName = &""
+var last_card_upgrade_id: StringName = &""
 var last_card_base_cost: int = -1
 var last_card_exhausts: bool = false
 var last_card_temporary: bool = false
@@ -102,13 +104,17 @@ func start_battle(
 	p_tutorial_stage: int = TUTORIAL_STAGE_MIN,
 	p_bonus_card_ids: Array[StringName] = [],
 	p_enemy_id: StringName = &"",
-	p_relics: Array[StringName] = []
+	p_relics: Array[StringName] = [],
+	p_deck_instances: Array[Dictionary] = [],
+	p_player_hp: int = PLAYER_MAX_HP,
+	p_player_max_hp: int = PLAYER_MAX_HP
 ) -> void:
 	seed_value = p_seed
 	rng.seed = seed_value
 	tutorial_stage = clampi(p_tutorial_stage, TUTORIAL_STAGE_MIN, TUTORIAL_STAGE_MAX)
 	next_instance_id = 1
-	player_hp = PLAYER_MAX_HP
+	player_max_hp = maxi(1, p_player_max_hp)
+	player_hp = clampi(p_player_hp, 0, player_max_hp)
 	player_block = 0
 	energy = BASE_ENERGY
 	instability = 0
@@ -130,6 +136,7 @@ func start_battle(
 	card_unsealed_this_turn = false
 	prevent_next_fracture_damage = false
 	last_card_id = &""
+	last_card_upgrade_id = &""
 	last_card_base_cost = -1
 	last_card_exhausts = false
 	last_card_temporary = false
@@ -147,11 +154,13 @@ func start_battle(
 	rule_engine.reset_for_battle(p_relics)
 	_configure_tutorial_stage()
 	_configure_enemy(p_enemy_id if p_enemy_id != &"" else EnemyCatalog.enemy_id_for_path_stage(tutorial_stage))
-	_build_tutorial_deck()
-	# 六场序章继续使用原有渐进教学牌组；RunModel 中永久获得的牌作为额外牌加入，
-	# 从而既不提前暴露后续关键词，也保证奖励会进入后续战斗。
-	for bonus_card_id: StringName in p_bonus_card_ids:
-		_add_card_by_id(bonus_card_id)
+	if p_deck_instances.is_empty():
+		_build_tutorial_deck()
+		# 旧测试与机制测试场继续使用渐进牌组；奖励牌作为额外牌加入。
+		for bonus_card_id: StringName in p_bonus_card_ids:
+			_add_card_by_id(bonus_card_id)
+	else:
+		_build_run_deck(p_deck_instances)
 	_shuffle_cards(draw_pile)
 	_log("路径节点 %d/%d：%s。" % [tutorial_stage, TUTORIAL_STAGE_MAX, tutorial_stage_title])
 	_log("%s出现，生命 %d。" % [enemy_name, enemy_hp])
@@ -435,7 +444,7 @@ func _apply_chosen_effect(effect: CardEffect, target_index: int) -> void:
 		CardEffect.Kind.PREWRITE_COPY:
 			var original: CardData = hand[target_index]
 			original.cost_override_this_turn = 0
-			var copy: CardData = _make_card_from_catalog(original.id)
+			var copy: CardData = _make_card_from_catalog(original.id, original.upgrade_id)
 			copy.temporary = true
 			copy.sealed_turns = 1
 			sealed_zone.append(copy)
@@ -471,6 +480,7 @@ func _finish_card_play() -> void:
 		last_nonstatus_card_type = card.card_type
 	last_card_type = card.card_type
 	last_card_id = card.id
+	last_card_upgrade_id = card.upgrade_id
 	last_card_base_cost = card.base_cost
 	last_card_exhausts = card.exhausts
 	last_card_temporary = card.temporary
@@ -642,6 +652,7 @@ func _start_player_turn() -> void:
 	last_nonstatus_card_type = -1
 	last_card_type = -1
 	last_card_id = &""
+	last_card_upgrade_id = &""
 	last_card_base_cost = -1
 	last_card_exhausts = false
 	last_card_temporary = false
@@ -683,13 +694,13 @@ func _unseal_card_at(index: int) -> void:
 	_log("《%s》解封。" % card.title)
 	match card.id:
 		&"delayed_guard":
-			var gained: int = _gain_player_block(12, card.title, false)
+			var gained: int = _gain_player_block(card.value(&"unseal_block", 12), card.title, false)
 			_log("解封效果：获得 %d 格挡。" % gained)
 		&"countdown_scar":
 			var target: int = TargetSelector.resolve_enemy(
 				TargetSelector.Kind.LOWEST_HP_ENEMY, build_target_context()
 			)
-			_deal_damage_to_enemy(18, CardData.CardType.ATTACK, card.title, target)
+			_deal_damage_to_enemy(card.value(&"unseal_damage", 18), CardData.CardType.ATTACK, card.title, target)
 	if hand.size() < MAX_HAND_SIZE:
 		hand.append(card)
 		_log("《%s》返回手牌。" % card.title)
@@ -702,52 +713,50 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 	var effects: Array[CardEffect] = []
 	match card.id:
 		&"calibration_strike":
-			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, 6))
+			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"damage", 6)))
 		&"temporary_guard":
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 5))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"block", 5)))
 		&"boundary_read":
 			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, 2))
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, 2))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, card.value(&"overload", 2)))
 		&"aftershock":
 			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, 5))
 			if instability_gained_this_turn:
-				effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, 4))
+				effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"bonus_damage", 4)))
 		&"broken_sentence":
-			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, 7))
+			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"damage", 7)))
 			if cards_played_this_turn == 0:
 				effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, 1))
 		&"blank_space":
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 7))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 7)))
 			if not attack_played_this_turn:
 				effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 3))
 		&"index_reorder":
-			# 真实选择流程：查看抽牌堆顶 3 张，由玩家指定其中 1 张置入弃牌堆。
 			effects.append(
 				CardEffect.new(CardEffect.Kind.DISCARD_CHOSEN_FROM_TOP, 1).with_target(
 					TargetSelector.Kind.DRAW_PILE_TOP, "选择置入弃牌堆的牌",
-					TargetSelector.Filter.NONE, 3
+					TargetSelector.Filter.NONE, card.value(&"look_count", 3)
 				)
 			)
 		&"unsigned_support":
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 6))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 6)))
 			if card_unsealed_this_turn:
 				effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 5))
 		&"rift_slash":
-			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, 11))
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, 2))
+			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"damage", 11)))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, card.value(&"overload", 2)))
 		&"forced_stability":
-			effects.append(CardEffect.new(CardEffect.Kind.REDUCE_INSTABILITY, 3, 2))
+			effects.append(CardEffect.new(CardEffect.Kind.REDUCE_INSTABILITY, 3, card.value(&"block_per_instability", 2)))
 		&"critical_permission":
 			effects.append(CardEffect.new(CardEffect.Kind.PREVENT_FRACTURE, 1))
 			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, 1))
 		&"dissolution_protocol":
-			effects.append(CardEffect.new(CardEffect.Kind.DISSOLUTION_ATTACK, 14, 2))
+			effects.append(CardEffect.new(CardEffect.Kind.DISSOLUTION_ATTACK, card.value(&"base_damage", 14), 2))
 		&"delayed_guard":
-			effects.append(CardEffect.new(CardEffect.Kind.SEAL_CARD, 1))
+			effects.append(CardEffect.new(CardEffect.Kind.SEAL_CARD, card.value(&"sealed_turns", 1)))
 		&"countdown_scar":
-			effects.append(CardEffect.new(CardEffect.Kind.SEAL_CARD, 2))
+			effects.append(CardEffect.new(CardEffect.Kind.SEAL_CARD, card.value(&"sealed_turns", 2)))
 		&"prewritten_ending":
-			# 真实选择流程：由玩家指定手牌中的一张非消逝牌。
 			effects.append(
 				CardEffect.new(CardEffect.Kind.PREWRITE_COPY, 1).with_target(
 					TargetSelector.Kind.HAND_CARD, "选择被复制并封存的手牌",
@@ -755,21 +764,24 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 				)
 			)
 		&"unseal_order":
-			# 真实选择流程：由玩家指定封存区中的一张牌。
 			effects.append(
 				CardEffect.new(CardEffect.Kind.UNSEAL_CHOSEN, 1).with_target(
 					TargetSelector.Kind.SEALED_CARD, "选择立即解封的封存牌"
 				)
 			)
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, 2))
+			var unseal_overload: int = card.value(&"overload", 2)
+			if unseal_overload > 0:
+				effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, unseal_overload))
 		&"restate":
-			effects.append(CardEffect.new(CardEffect.Kind.ECHO_ATTACK, 60))
+			effects.append(CardEffect.new(CardEffect.Kind.ECHO_ATTACK, card.value(&"echo_percent", 60)))
 		&"copied_guard":
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 4))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 4)))
 			effects.append(CardEffect.new(CardEffect.Kind.ECHO_BLOCK, 50))
 		&"homophone":
 			effects.append(CardEffect.new(CardEffect.Kind.COPY_PREVIOUS, 1))
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, 1))
+			var copy_overload: int = card.value(&"overload", 1)
+			if copy_overload > 0:
+				effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, copy_overload))
 	return effects
 
 
@@ -834,7 +846,7 @@ func _deal_damage_to_player(base_amount: int, source_name: String) -> void:
 	var hp_damage: int = amount - blocked
 	player_hp = maxi(0, player_hp - hp_damage)
 	_log("%s使用%s：造成 %d 伤害（格挡抵消 %d），你的生命 %d/%d。" % [
-		enemy_name, source_name, hp_damage, blocked, player_hp, PLAYER_MAX_HP,
+		enemy_name, source_name, hp_damage, blocked, player_hp, player_max_hp,
 	])
 	_check_player_defeat()
 
@@ -1002,7 +1014,7 @@ func _check_fracture() -> void:
 		prevent_next_fracture_damage = false
 	player_hp = maxi(0, player_hp - damage)
 	_log("裂解触发：受到 %d 点不可格挡伤害，不稳定降至 %d，生命 %d/%d。" % [
-		damage, instability, player_hp, PLAYER_MAX_HP,
+		damage, instability, player_hp, player_max_hp,
 	])
 	_check_player_defeat()
 
@@ -1097,6 +1109,15 @@ func _build_tutorial_deck() -> void:
 				_add_card_by_id(card_id)
 
 
+func _build_run_deck(deck_instances: Array[Dictionary]) -> void:
+	for instance: Dictionary in deck_instances:
+		var instance_id: int = int(instance[&"instance_id"])
+		var card_id: StringName = instance[&"card_id"] as StringName
+		var upgrade_id: StringName = instance.get(&"upgrade_id", &"") as StringName
+		draw_pile.append(CardCatalog.create_card(card_id, instance_id, upgrade_id))
+		next_instance_id = maxi(next_instance_id, instance_id + 1)
+
+
 func _add_basic_cards(attack_count: int, defense_count: int) -> void:
 	for duplicate_index: int in range(attack_count):
 		_add_card_by_id(&"calibration_strike")
@@ -1111,8 +1132,8 @@ func _add_card_by_id(card_id: StringName) -> void:
 	draw_pile.append(_make_card_from_catalog(card_id))
 
 
-func _make_card_from_catalog(card_id: StringName) -> CardData:
-	var card: CardData = CardCatalog.create_card(card_id, next_instance_id)
+func _make_card_from_catalog(card_id: StringName, upgrade_id: StringName = &"") -> CardData:
+	var card: CardData = CardCatalog.create_card(card_id, next_instance_id, upgrade_id)
 	next_instance_id += 1
 	return card
 
@@ -1127,7 +1148,7 @@ func _copy_previous_card_to_hand() -> void:
 	if hand.size() >= MAX_HAND_SIZE:
 		_log("同音异义复制失败：手牌已满。")
 		return
-	var copy: CardData = _make_card_from_catalog(last_card_id)
+	var copy: CardData = _make_card_from_catalog(last_card_id, last_card_upgrade_id)
 	copy.temporary = true
 	copy.exhausts = true
 	copy.cost_override_this_turn = 0

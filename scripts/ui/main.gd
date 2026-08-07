@@ -8,6 +8,7 @@ var model: CombatModel
 var run_model: RunModel
 var current_stage: int = CombatModel.TUTORIAL_STAGE_MIN
 var is_test_mode: bool = false
+var ui_mode: StringName = &"menu"
 ## 机制测试场当前选定的对手；主线节点始终使用路径目录中的敌人。
 var test_arena_enemy_id: StringName = EnemyCatalog.TEST_ARENA_ENEMY_IDS[0]
 var screen_root: MarginContainer
@@ -57,6 +58,7 @@ func _clear_screen() -> void:
 
 
 func _show_main_menu() -> void:
+	ui_mode = &"menu"
 	is_test_mode = false
 	_clear_screen()
 	var menu: VBoxContainer = VBoxContainer.new()
@@ -94,10 +96,276 @@ func _restart_run() -> void:
 	run_model = RunModelScript.new()
 	run_model.start_run(RunModel.DEFAULT_SEED)
 	current_stage = CombatModel.TUTORIAL_STAGE_MIN
-	_start_current_battle()
+	_show_map_screen()
+
+
+func _show_map_screen() -> void:
+	ui_mode = &"map"
+	_clear_screen()
+	var map_page: VBoxContainer = VBoxContainer.new()
+	map_page.add_theme_constant_override("separation", 10)
+	screen_root.add_child(map_page)
+	_add_page_title(map_page, "无字之城远征", run_model.get_summary_text())
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	map_page.add_child(scroll)
+	var depths: VBoxContainer = VBoxContainer.new()
+	depths.add_theme_constant_override("separation", 8)
+	scroll.add_child(depths)
+	for depth: int in range(1, 10):
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		depths.add_child(row)
+		var depth_label: Label = Label.new()
+		depth_label.text = "第%d层" % depth
+		depth_label.custom_minimum_size = Vector2(90, 48)
+		row.add_child(depth_label)
+		for node: MapNode in run_model.map_graph.get_nodes_at_depth(depth):
+			var button: Button = Button.new()
+			button.custom_minimum_size = Vector2(270, 48)
+			button.text = "%s｜%s%s" % [
+				node.id,
+				node.type_name() if node.revealed else "未揭示",
+				"｜已完成" if node.completed else "",
+			]
+			button.disabled = not run_model.available_node_ids.has(node.id) or node.completed
+			button.tooltip_text = "只能进入当前路线的合法后继。" if button.disabled else "进入该节点"
+			button.pressed.connect(_on_map_node_pressed.bind(node.id))
+			row.add_child(button)
+	var footer: HBoxContainer = HBoxContainer.new()
+	map_page.add_child(footer)
+	var deck_button: Button = Button.new()
+	deck_button.text = "查看牌组实例"
+	deck_button.pressed.connect(_show_deck_screen)
+	footer.add_child(deck_button)
+	var title_button: Button = Button.new()
+	title_button.text = "返回标题"
+	title_button.pressed.connect(_show_main_menu)
+	footer.add_child(title_button)
+
+
+func _show_deck_screen() -> void:
+	ui_mode = &"deck"
+	_clear_screen()
+	var deck_page: VBoxContainer = VBoxContainer.new()
+	deck_page.add_theme_constant_override("separation", 8)
+	screen_root.add_child(deck_page)
+	_add_page_title(deck_page, "牌组实例", "相同卡牌的每个实例独立保存升级状态。")
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	deck_page.add_child(scroll)
+	var list: VBoxContainer = VBoxContainer.new()
+	scroll.add_child(list)
+	for instance: Dictionary in run_model.deck_instances:
+		var label: Label = Label.new()
+		label.text = run_model.describe_deck_instance(instance)
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		list.add_child(label)
+	var back: Button = Button.new()
+	back.text = "返回地图"
+	back.pressed.connect(_show_map_screen)
+	deck_page.add_child(back)
+
+
+func _on_map_node_pressed(node_id: StringName) -> void:
+	if not run_model.enter_node(node_id):
+		return
+	var node: MapNode = run_model.get_current_map_node()
+	match node.node_type:
+		MapNode.NodeType.BATTLE, MapNode.NodeType.ELITE:
+			_start_current_battle()
+		MapNode.NodeType.EVENT:
+			_show_event_screen()
+		MapNode.NodeType.SHOP:
+			_show_shop_screen()
+		MapNode.NodeType.FORGE:
+			_show_forge_screen()
+		MapNode.NodeType.REST:
+			_show_rest_screen()
+		MapNode.NodeType.BOSS:
+			_show_boss_placeholder()
+
+
+func _show_shop_screen() -> void:
+	ui_mode = &"shop"
+	_clear_screen()
+	var shop_page: VBoxContainer = VBoxContainer.new()
+	shop_page.add_theme_constant_override("separation", 8)
+	screen_root.add_child(shop_page)
+	_add_page_title(shop_page, "残页商店", "库存由节点种子冻结；售出不补。墨晶 %d" % run_model.ink_crystals)
+	var shop: ShopModel = ShopModel.new(run_model.pending_shop_stock)
+	var cards: Array = run_model.pending_shop_stock.get(&"cards", [])
+	for index: int in range(cards.size()):
+		var item: Dictionary = cards[index]
+		var definition: Dictionary = CardCatalog.get_definition(item[&"card_id"] as StringName)
+		var reason: String = shop.card_unavailable_reason(run_model, index)
+		var button: Button = Button.new()
+		button.text = "%s｜%d 墨晶｜%s%s" % [definition[&"title"], item[&"price"], definition[&"description"], "｜不可用：%s" % reason if not reason.is_empty() else ""]
+		button.disabled = not reason.is_empty()
+		button.tooltip_text = reason
+		button.pressed.connect(_on_shop_card_pressed.bind(index))
+		shop_page.add_child(button)
+	var relic: Dictionary = run_model.pending_shop_stock.get(&"relic", {})
+	var relic_reason: String = shop.relic_unavailable_reason(run_model)
+	var relic_button: Button = Button.new()
+	relic_button.text = "%s｜%d 墨晶%s" % [RuleEngine.relic_title(relic[&"relic_id"] as StringName), relic[&"price"], "｜不可用：%s" % relic_reason if not relic_reason.is_empty() else ""]
+	relic_button.disabled = not relic_reason.is_empty()
+	relic_button.tooltip_text = relic_reason
+	relic_button.pressed.connect(_on_shop_relic_pressed)
+	shop_page.add_child(relic_button)
+	var service: Dictionary = run_model.pending_shop_stock.get(&"remove_service", {})
+	var remove_reason: String = shop.remove_unavailable_reason(run_model)
+	var remove_label: Label = Label.new()
+	remove_label.text = "移除服务｜%d 墨晶%s" % [service[&"price"], "｜不可用：%s" % remove_reason if not remove_reason.is_empty() else ""]
+	shop_page.add_child(remove_label)
+	for instance: Dictionary in run_model.deck_instances:
+		var remove_button: Button = Button.new()
+		remove_button.text = "移除 %s" % run_model.describe_deck_instance(instance)
+		remove_button.disabled = not remove_reason.is_empty()
+		remove_button.tooltip_text = remove_reason
+		remove_button.pressed.connect(_on_shop_remove_pressed.bind(int(instance[&"instance_id"])))
+		shop_page.add_child(remove_button)
+	var leave: Button = Button.new()
+	leave.text = "离开商店并返回地图"
+	leave.pressed.connect(_on_shop_leave_pressed)
+	shop_page.add_child(leave)
+
+
+func _on_shop_card_pressed(index: int) -> void:
+	if run_model.buy_shop_card(index):
+		_show_shop_screen()
+
+
+func _on_shop_relic_pressed() -> void:
+	if run_model.buy_shop_relic():
+		_show_shop_screen()
+
+
+func _on_shop_remove_pressed(instance_id: int) -> void:
+	if run_model.use_shop_remove(instance_id):
+		_show_shop_screen()
+
+
+func _on_shop_leave_pressed() -> void:
+	if run_model.finish_shop() and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _show_forge_screen() -> void:
+	_show_upgrade_screen(&"forge")
+
+
+func _show_rest_upgrade_screen() -> void:
+	_show_upgrade_screen(&"rest_upgrade")
+
+
+func _show_upgrade_screen(mode: StringName) -> void:
+	ui_mode = mode
+	_clear_screen()
+	var upgrade_page: VBoxContainer = VBoxContainer.new()
+	upgrade_page.add_theme_constant_override("separation", 8)
+	screen_root.add_child(upgrade_page)
+	_add_page_title(upgrade_page, "锻造" if mode == &"forge" else "休整：升级", "选择具体未升级实例；每次只升级一张。")
+	for instance: Dictionary in run_model.get_unupgraded_instances():
+		var preview: Dictionary = run_model.get_upgrade_preview(int(instance[&"instance_id"]))
+		var button: Button = Button.new()
+		button.text = "#%d %s\n升级前：%s\n升级后：%s" % [instance[&"instance_id"], CardCatalog.get_definition(instance[&"card_id"] as StringName)[&"title"], preview[&"before"], preview[&"after"]]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.pressed.connect(_on_upgrade_instance_pressed.bind(int(instance[&"instance_id"]), mode))
+		upgrade_page.add_child(button)
+	var skip: Button = Button.new()
+	skip.text = "没有可升级牌，离开" if run_model.get_unupgraded_instances().is_empty() else "跳过"
+	skip.pressed.connect(_on_upgrade_skipped.bind(mode))
+	upgrade_page.add_child(skip)
+
+
+func _on_upgrade_instance_pressed(instance_id: int, mode: StringName) -> void:
+	var resolved: bool = run_model.resolve_forge_upgrade(instance_id) if mode == &"forge" else run_model.resolve_rest_upgrade(instance_id)
+	if resolved and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _on_upgrade_skipped(mode: StringName) -> void:
+	var resolved: bool = run_model.skip_forge() if mode == &"forge" else run_model.skip_rest()
+	if resolved and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _show_rest_screen() -> void:
+	ui_mode = &"rest"
+	_clear_screen()
+	var rest_page: VBoxContainer = VBoxContainer.new()
+	rest_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	rest_page.add_theme_constant_override("separation", 14)
+	screen_root.add_child(rest_page)
+	_add_page_title(rest_page, "休整", "恢复20%最大生命、升级一张牌，或跳过。")
+	var heal_amount: int = maxi(1, floori(float(run_model.player_max_hp) * 0.2))
+	var heal: Button = Button.new()
+	heal.text = "恢复 %d 生命｜当前 %d/%d%s" % [heal_amount, run_model.player_hp, run_model.player_max_hp, "｜不可用：生命已满" if run_model.player_hp >= run_model.player_max_hp else ""]
+	heal.disabled = run_model.player_hp >= run_model.player_max_hp
+	heal.tooltip_text = "生命已满" if heal.disabled else ""
+	heal.pressed.connect(_on_rest_heal_pressed)
+	rest_page.add_child(heal)
+	var upgrade: Button = Button.new()
+	upgrade.text = "升级一张未升级牌%s" % ("｜不可用：没有可升级实例" if run_model.get_unupgraded_instances().is_empty() else "")
+	upgrade.disabled = run_model.get_unupgraded_instances().is_empty()
+	upgrade.tooltip_text = "没有可升级实例" if upgrade.disabled else ""
+	upgrade.pressed.connect(_show_rest_upgrade_screen)
+	rest_page.add_child(upgrade)
+	var skip: Button = Button.new()
+	skip.text = "跳过并返回地图"
+	skip.pressed.connect(_on_rest_skip_pressed)
+	rest_page.add_child(skip)
+
+
+func _on_rest_heal_pressed() -> void:
+	if run_model.resolve_rest_heal() and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _on_rest_skip_pressed() -> void:
+	if run_model.skip_rest() and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _show_boss_placeholder() -> void:
+	ui_mode = &"boss_placeholder"
+	_clear_screen()
+	var boss_page: VBoxContainer = VBoxContainer.new()
+	boss_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	boss_page.add_theme_constant_override("separation", 18)
+	screen_root.add_child(boss_page)
+	_add_page_title(boss_page, "章节终点尚未接入", "M1 Boss占位：不冒充正式Boss战。")
+	var finish: Button = Button.new()
+	finish.text = "记录抵达并结束本次骨架验证"
+	finish.pressed.connect(_on_boss_placeholder_finished)
+	boss_page.add_child(finish)
+
+
+func _on_boss_placeholder_finished() -> void:
+	if run_model.acknowledge_boss_placeholder() and run_model.complete_current_node():
+		_show_expedition_complete_screen()
+
+
+func _show_expedition_complete_screen() -> void:
+	ui_mode = &"expedition_complete"
+	_clear_screen()
+	var complete_page: VBoxContainer = VBoxContainer.new()
+	complete_page.alignment = BoxContainer.ALIGNMENT_CENTER
+	complete_page.add_theme_constant_override("separation", 18)
+	screen_root.add_child(complete_page)
+	_add_page_title(complete_page, "已抵达章节终点", "正式Boss将在M2接入。")
+	var summary: Label = Label.new()
+	summary.text = run_model.get_summary_text()
+	complete_page.add_child(summary)
+	var back: Button = Button.new()
+	back.text = "返回标题"
+	back.pressed.connect(_show_main_menu)
+	complete_page.add_child(back)
 
 
 func _show_test_arena_menu() -> void:
+	ui_mode = &"test_menu"
 	is_test_mode = false
 	_clear_screen()
 	var menu: VBoxContainer = VBoxContainer.new()
@@ -154,14 +422,32 @@ func _start_test_level(arena_enemy_id: StringName = EnemyCatalog.TEST_ARENA_ENEM
 
 
 func _start_current_battle() -> void:
+	ui_mode = &"combat"
 	model = CombatModelScript.new()
-	model.start_battle(
-		CombatModel.DEFAULT_SEED + current_stage,
-		current_stage,
-		run_model.get_acquired_card_ids(),
-		test_arena_enemy_id if is_test_mode else &"",
-		run_model.get_relic_ids()
-	)
+	if is_test_mode:
+		model.start_battle(
+			CombatModel.DEFAULT_SEED + current_stage,
+			current_stage,
+			run_model.get_acquired_card_ids(),
+			test_arena_enemy_id,
+			run_model.get_relic_ids()
+		)
+	else:
+		var node: MapNode = run_model.get_current_map_node()
+		if node == null:
+			_show_map_screen()
+			return
+		current_stage = clampi(node.depth, CombatModel.TUTORIAL_STAGE_MIN, CombatModel.TUTORIAL_STAGE_MAX)
+		model.start_battle(
+			node.content_seed,
+			current_stage,
+			[],
+			node.enemy_id,
+			run_model.get_relic_ids(),
+			run_model.get_deck_instances(),
+			run_model.player_hp,
+			run_model.player_max_hp
+		)
 	_build_combat_screen()
 	_refresh_combat()
 
@@ -204,7 +490,7 @@ func _build_combat_screen() -> void:
 	var stats: HBoxContainer = HBoxContainer.new()
 	stats.add_theme_constant_override("separation", 24)
 	stats_panel.add_child(stats)
-	_add_stat(stats, "生命", "%d / %d" % [model.player_hp, CombatModel.PLAYER_MAX_HP])
+	_add_stat(stats, "生命", "%d / %d" % [model.player_hp, model.player_max_hp])
 	_add_stat(stats, "稳定度", "%d / %d" % [model.energy, CombatModel.BASE_ENERGY])
 	_add_stat(stats, "格挡", str(model.player_block))
 	_add_stat(stats, "不稳定", "%d / %d" % [model.instability, CombatModel.INSTABILITY_THRESHOLD] if model.is_mechanic_unlocked(&"overload") else "读数稳定")
@@ -421,10 +707,13 @@ func _on_battle_result_pressed() -> void:
 		run_model.generate_reward_choices(current_stage)
 		_show_reward_screen()
 	else:
-		_advance_after_interlude()
+		run_model.mark_current_node_resolved()
+		run_model.complete_current_node()
+		_show_map_screen()
 
 
 func _show_reward_screen() -> void:
+	ui_mode = &"reward"
 	_clear_screen()
 	var reward_page: VBoxContainer = VBoxContainer.new()
 	reward_page.add_theme_constant_override("separation", 18)
@@ -465,13 +754,13 @@ func _show_reward_screen() -> void:
 
 
 func _on_reward_chosen(index: int) -> void:
-	if run_model.choose_reward(index):
-		_advance_after_interlude()
+	if run_model.choose_reward(index) and run_model.complete_current_node():
+		_show_map_screen()
 
 
 func _on_reward_skipped() -> void:
-	if run_model.skip_reward():
-		_advance_after_interlude()
+	if run_model.skip_reward() and run_model.complete_current_node():
+		_show_map_screen()
 
 
 func _advance_after_interlude() -> void:
@@ -521,6 +810,7 @@ func _get_path_transition_data(stage: int) -> Dictionary:
 
 
 func _show_event_screen() -> void:
+	ui_mode = &"event"
 	_clear_screen()
 	var event_page: VBoxContainer = VBoxContainer.new()
 	event_page.add_theme_constant_override("separation", 18)
@@ -554,17 +844,18 @@ func _show_event_screen() -> void:
 
 
 func _on_event_choice(index: int) -> void:
-	if run_model.apply_event_choice(index):
+	if run_model.apply_event_choice(index) and run_model.complete_current_node():
 		_show_summary_screen()
 
 
 func _show_summary_screen() -> void:
+	ui_mode = &"event_outcome"
 	_clear_screen()
 	var summary_page: VBoxContainer = VBoxContainer.new()
 	summary_page.alignment = BoxContainer.ALIGNMENT_CENTER
 	summary_page.add_theme_constant_override("separation", 22)
 	screen_root.add_child(summary_page)
-	_add_page_title(summary_page, "序章记录封存", "你带回了一些答案，也带回了更多问题。")
+	_add_page_title(summary_page, "事件记录", "节点已经完成；路线后继已开放。")
 	var outcome: Label = Label.new()
 	outcome.text = run_model.event_outcome
 	outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -583,11 +874,11 @@ func _show_summary_screen() -> void:
 		evidence_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		evidence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		summary_page.add_child(evidence_label)
-	var restart: Button = Button.new()
-	restart.text = "以相同种子重新远征"
-	restart.custom_minimum_size = Vector2(240, 50)
-	restart.pressed.connect(_restart_run)
-	summary_page.add_child(restart)
+	var back: Button = Button.new()
+	back.text = "返回地图"
+	back.custom_minimum_size = Vector2(240, 50)
+	back.pressed.connect(_show_map_screen)
+	summary_page.add_child(back)
 
 
 func _add_page_title(parent: VBoxContainer, heading: String, subtitle: String) -> void:

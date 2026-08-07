@@ -28,6 +28,8 @@ func _run() -> void:
 		_expect(not model.tutorial_stage_title.contains("教学"), "path %d title is diegetic" % stage)
 		_expect(not model.tutorial_hint.contains("教学"), "path %d context text is diegetic" % stage)
 
+	await _test_expedition_ui(main)
+
 	# 机制测试场的对手菜单必须列出目录中的每个可选敌人。
 	main._show_test_arena_menu()
 	await process_frame
@@ -84,6 +86,100 @@ func _run() -> void:
 	else:
 		push_error("FAIL: %d flow checks failed" % failures)
 		quit(1)
+
+
+func _test_expedition_ui(main) -> void:
+	_expect(main.ui_mode == &"map", "starting a run opens the nine-depth map UI")
+	_expect(main.run_model.available_node_ids == [&"d01_00"], "map UI begins with only the legal start node")
+	main._on_map_node_pressed(&"d02_01")
+	await process_frame
+	_expect(main.ui_mode == &"map", "UI rejects an unreachable map node")
+
+	main._on_map_node_pressed(&"d01_00")
+	await process_frame
+	_expect(main.ui_mode == &"combat", "battle node opens the combat UI")
+	main.model.battle_over = true
+	main.model.victory = true
+	main._on_battle_result_pressed()
+	await process_frame
+	_expect(main.ui_mode == &"reward", "battle victory opens the reward UI")
+	_expect(main.run_model.ink_crystals == RunModel.NORMAL_BATTLE_INCOME, "battle UI settles normal-node ink income once")
+	main._on_reward_skipped()
+	await process_frame
+	_expect(main.ui_mode == &"map" and main.run_model.available_node_ids.size() == 2, "reward completion returns to the map and opens the fork")
+
+	main._on_map_node_pressed(&"d02_01")
+	await process_frame
+	_expect(main.ui_mode == &"event", "event node opens the event UI")
+	main._on_event_choice(0)
+	await process_frame
+	_expect(main.ui_mode == &"event_outcome", "event choice completes into an outcome screen")
+	main._show_map_screen()
+	await process_frame
+	_expect(main.run_model.available_node_ids == [&"d03_00"], "event outcome returns to the legal route successor")
+
+	main._on_map_node_pressed(&"d03_00")
+	await process_frame
+	_expect(main.ui_mode == &"rest", "REST node opens heal/upgrade/skip choices")
+	main._on_rest_skip_pressed()
+	await process_frame
+	_expect(main.ui_mode == &"map", "skipping REST returns to the map")
+
+	main._on_map_node_pressed(&"d04_01")
+	await process_frame
+	_expect(main.ui_mode == &"shop", "shop node opens deterministic stock and removal UI")
+	var stock_digest: String = ShopCatalog.digest(main.run_model.pending_shop_stock)
+	main._show_shop_screen()
+	await process_frame
+	_expect(ShopCatalog.digest(main.run_model.pending_shop_stock) == stock_digest, "redrawing the shop UI does not reroll stock")
+	main._on_shop_leave_pressed()
+	await process_frame
+	_expect(main.ui_mode == &"map", "leaving the shop completes it and returns to map")
+
+	main._on_map_node_pressed(&"d05_00")
+	await process_frame
+	_expect(main.ui_mode == &"event", "second event node is wired through the same map protocol")
+	main._on_event_choice(0)
+	await process_frame
+	main._show_map_screen()
+	await process_frame
+
+	main._on_map_node_pressed(&"d06_01")
+	await process_frame
+	_expect(main.ui_mode == &"forge", "forge node opens instance upgrade selection")
+	var forge_candidates: Array[Dictionary] = main.run_model.get_unupgraded_instances()
+	var forge_id: int = int(forge_candidates[0][&"instance_id"])
+	main._on_upgrade_instance_pressed(forge_id, &"forge")
+	await process_frame
+	_expect(main.ui_mode == &"map", "forge upgrade completes and returns to map")
+	_expect(main.run_model.get_deck_instance(forge_id)[&"upgrade_id"] != &"", "forge UI upgrades the selected stable instance")
+
+	main._on_map_node_pressed(&"d07_00")
+	await process_frame
+	_expect(main.ui_mode == &"combat", "later battle node reuses combat UI with run deck")
+	main.model.battle_over = true
+	main.model.victory = true
+	main._on_battle_result_pressed()
+	await process_frame
+	_expect(main.ui_mode == &"reward", "later battle also returns through reward UI")
+	main._on_reward_skipped()
+	await process_frame
+
+	main.run_model.player_hp = 40
+	main._on_map_node_pressed(&"d08_00")
+	await process_frame
+	_expect(main.ui_mode == &"rest", "pre-Boss REST node opens correctly")
+	main._on_rest_heal_pressed()
+	await process_frame
+	_expect(main.run_model.player_hp == 54 and main.ui_mode == &"map", "REST heal applies 20 percent and returns to map")
+
+	main._on_map_node_pressed(&"d09_00")
+	await process_frame
+	_expect(main.ui_mode == &"boss_placeholder", "depth-nine node clearly opens the Boss placeholder")
+	main._on_boss_placeholder_finished()
+	await process_frame
+	_expect(main.ui_mode == &"expedition_complete", "Boss placeholder acknowledgement reaches the expedition summary")
+	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "Boss placeholder can only be completed once through the node protocol")
 
 
 func _expect(condition: bool, label: String) -> void:

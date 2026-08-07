@@ -68,7 +68,10 @@ func _test_reward_enters_later_battle() -> void:
 	var choices: Array[StringName] = run.generate_reward_choices(3)
 	run.choose_reward(0)
 	var battle: CombatModel = CombatModel.new()
-	battle.start_battle(73108, 5, run.get_acquired_card_ids())
+	battle.start_battle(
+		73108, 5, [], &"", run.get_relic_ids(), run.get_deck_instances(),
+		run.player_hp, run.player_max_hp
+	)
 	var all_ids: Array[StringName] = []
 	for pile in [battle.draw_pile, battle.hand, battle.discard_pile]:
 		for card: CardData in pile:
