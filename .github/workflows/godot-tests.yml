@@ -43,6 +43,9 @@ jobs:
       - name: Run route flow tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_flow.gd'
 
+      - name: Run responsive UI layout tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_ui_layout.gd'
+
       - name: Run map generation tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_map.gd'
 

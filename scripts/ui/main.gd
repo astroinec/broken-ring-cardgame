@@ -57,15 +57,60 @@ func _clear_screen() -> void:
 		child.queue_free()
 
 
+func _create_page(heading: String, subtitle: String) -> VBoxContainer:
+	var page_root: VBoxContainer = VBoxContainer.new()
+	page_root.name = "Page"
+	page_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page_root.add_theme_constant_override("separation", 10)
+	screen_root.add_child(page_root)
+	var header: VBoxContainer = VBoxContainer.new()
+	header.name = "PageHeader"
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_root.add_child(header)
+	_add_page_title(header, heading, subtitle)
+	return page_root
+
+
+func _add_page_scroll(page_root: VBoxContainer, content_name: String = "PageContent") -> VBoxContainer:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.name = "PageScroll"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	page_root.add_child(scroll)
+	var content: VBoxContainer = VBoxContainer.new()
+	content.name = content_name
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 10)
+	scroll.add_child(content)
+	return content
+
+
+func _add_page_footer(page_root: VBoxContainer) -> HBoxContainer:
+	var footer: HBoxContainer = HBoxContainer.new()
+	footer.name = "PageFooter"
+	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_theme_constant_override("separation", 10)
+	page_root.add_child(footer)
+	return footer
+
+
+func _configure_button(button: Button, minimum_height: float = 44.0) -> Button:
+	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size = Vector2(0, minimum_height)
+	return button
+
+
 func _show_main_menu() -> void:
 	ui_mode = &"menu"
 	is_test_mode = false
 	_clear_screen()
-	var menu: VBoxContainer = VBoxContainer.new()
+	var menu: VBoxContainer = _create_page("断环", "无字之城 / 序章原型")
 	menu.alignment = BoxContainer.ALIGNMENT_CENTER
 	menu.add_theme_constant_override("separation", 22)
-	screen_root.add_child(menu)
-	_add_page_title(menu, "断环", "无字之城 / 序章原型")
 	var premise: Label = Label.new()
 	premise.text = "第七名回收者在码头醒来。机构要求你进入正在坍缩的无字之城，取回一枚“定义律印”。\n墙上的返航名单被墨迹覆盖；最下面一行，像是你自己的笔迹。"
 	premise.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -73,20 +118,20 @@ func _show_main_menu() -> void:
 	premise.add_theme_font_size_override("font_size", 21)
 	premise.add_theme_color_override("font_color", Color("d8e0e7"))
 	menu.add_child(premise)
-	var start_button: Button = Button.new()
+	var start_button: Button = _configure_button(Button.new(), 62)
 	start_button.text = "进入无字之城"
-	start_button.custom_minimum_size = Vector2(360, 62)
 	start_button.pressed.connect(_restart_run)
 	menu.add_child(start_button)
-	var test_button: Button = Button.new()
+	var test_button: Button = _configure_button(Button.new(), 52)
 	test_button.text = "机制测试场"
-	test_button.custom_minimum_size = Vector2(360, 52)
 	test_button.tooltip_text = "独立于主线，集中体验当前已实现的核心牌组机制。"
 	test_button.pressed.connect(_show_test_arena_menu)
 	menu.add_child(test_button)
 	var note: Label = Label.new()
 	note.text = "主线机制会随路径、敌人与获得的残页自然出现；测试场不计入故事。"
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	note.add_theme_color_override("font_color", Color("8295a8"))
 	menu.add_child(note)
 
@@ -102,27 +147,61 @@ func _restart_run() -> void:
 func _show_map_screen() -> void:
 	ui_mode = &"map"
 	_clear_screen()
-	var map_page: VBoxContainer = VBoxContainer.new()
-	map_page.add_theme_constant_override("separation", 10)
-	screen_root.add_child(map_page)
-	_add_page_title(map_page, "无字之城远征", run_model.get_summary_text())
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	map_page.add_child(scroll)
-	var depths: VBoxContainer = VBoxContainer.new()
-	depths.add_theme_constant_override("separation", 8)
-	scroll.add_child(depths)
+	var map_page: VBoxContainer = _create_page("无字之城远征", "选择当前路线的合法后继；完整远征状态始终显示在地图顶部。")
+	var status_panel: PanelContainer = PanelContainer.new()
+	status_panel.name = "RunStatus"
+	status_panel.add_theme_stylebox_override("panel", _panel_style(Color("182332"), Color("40566e"), 8))
+	map_page.add_child(status_panel)
+	var status_column: VBoxContainer = VBoxContainer.new()
+	status_column.add_theme_constant_override("separation", 6)
+	status_panel.add_child(status_column)
+	var stats: GridContainer = GridContainer.new()
+	stats.columns = 4
+	stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_column.add_child(stats)
+	_add_profile_stat(stats, "生命", "%d / %d" % [run_model.player_hp, run_model.player_max_hp])
+	_add_profile_stat(stats, "墨晶", str(run_model.ink_crystals))
+	_add_profile_stat(stats, "牌组", "%d 张" % run_model.deck_instances.size())
+	_add_profile_stat(stats, "已升级", "%d 张" % _upgraded_card_count())
+	_add_profile_stat(stats, "证据", "%d 条" % run_model.evidence.size())
+	_add_profile_stat(stats, "当前层", "%d / 9" % run_model.current_node)
+	_add_profile_stat(stats, "已完成节点", "%d 个" % _completed_node_count())
+	_add_profile_stat(stats, "固定种子", str(run_model.seed_value))
+	var relics: Label = Label.new()
+	relics.text = "遗物：%s" % _relic_names()
+	relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	relics.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	relics.add_theme_color_override("font_color", Color("d8e0e7"))
+	status_column.add_child(relics)
+	var archive_actions: HBoxContainer = HBoxContainer.new()
+	archive_actions.add_theme_constant_override("separation", 8)
+	status_column.add_child(archive_actions)
+	var deck_button: Button = _configure_button(Button.new())
+	deck_button.text = "查看牌组"
+	deck_button.pressed.connect(_show_deck_screen)
+	archive_actions.add_child(deck_button)
+	var relic_button: Button = _configure_button(Button.new())
+	relic_button.text = "查看遗物"
+	relic_button.pressed.connect(_show_archive_screen.bind(&"relics"))
+	archive_actions.add_child(relic_button)
+	var evidence_button: Button = _configure_button(Button.new())
+	evidence_button.text = "查看证据"
+	evidence_button.pressed.connect(_show_archive_screen.bind(&"evidence"))
+	archive_actions.add_child(evidence_button)
+
+	var depths: VBoxContainer = _add_page_scroll(map_page, "MapDepths")
 	for depth: int in range(1, 10):
 		var row: HBoxContainer = HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_theme_constant_override("separation", 12)
 		depths.add_child(row)
 		var depth_label: Label = Label.new()
 		depth_label.text = "第%d层" % depth
-		depth_label.custom_minimum_size = Vector2(90, 48)
+		depth_label.custom_minimum_size = Vector2(80, 54)
+		depth_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row.add_child(depth_label)
 		for node: MapNode in run_model.map_graph.get_nodes_at_depth(depth):
-			var button: Button = Button.new()
-			button.custom_minimum_size = Vector2(270, 48)
+			var button: Button = _configure_button(Button.new(), 54)
 			button.text = "%s｜%s%s" % [
 				node.id,
 				node.type_name() if node.revealed else "未揭示",
@@ -132,13 +211,8 @@ func _show_map_screen() -> void:
 			button.tooltip_text = "只能进入当前路线的合法后继。" if button.disabled else "进入该节点"
 			button.pressed.connect(_on_map_node_pressed.bind(node.id))
 			row.add_child(button)
-	var footer: HBoxContainer = HBoxContainer.new()
-	map_page.add_child(footer)
-	var deck_button: Button = Button.new()
-	deck_button.text = "查看牌组实例"
-	deck_button.pressed.connect(_show_deck_screen)
-	footer.add_child(deck_button)
-	var title_button: Button = Button.new()
+	var footer: HBoxContainer = _add_page_footer(map_page)
+	var title_button: Button = _configure_button(Button.new())
 	title_button.text = "返回标题"
 	title_button.pressed.connect(_show_main_menu)
 	footer.add_child(title_button)
@@ -147,24 +221,96 @@ func _show_map_screen() -> void:
 func _show_deck_screen() -> void:
 	ui_mode = &"deck"
 	_clear_screen()
-	var deck_page: VBoxContainer = VBoxContainer.new()
-	deck_page.add_theme_constant_override("separation", 8)
-	screen_root.add_child(deck_page)
-	_add_page_title(deck_page, "牌组实例", "相同卡牌的每个实例独立保存升级状态。")
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	deck_page.add_child(scroll)
-	var list: VBoxContainer = VBoxContainer.new()
-	scroll.add_child(list)
+	var deck_page: VBoxContainer = _create_page(
+		"牌组实例",
+		"共 %d 张；相同卡牌的每个实例独立保存升级状态。" % run_model.deck_instances.size()
+	)
+	var list: VBoxContainer = _add_page_scroll(deck_page, "DeckList")
 	for instance: Dictionary in run_model.deck_instances:
-		var label: Label = Label.new()
-		label.text = run_model.describe_deck_instance(instance)
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		list.add_child(label)
-	var back: Button = Button.new()
+		list.add_child(_create_deck_instance_panel(instance))
+	var footer: HBoxContainer = _add_page_footer(deck_page)
+	var back: Button = _configure_button(Button.new())
 	back.text = "返回地图"
 	back.pressed.connect(_show_map_screen)
-	deck_page.add_child(back)
+	footer.add_child(back)
+
+
+func _create_deck_instance_panel(instance: Dictionary) -> PanelContainer:
+	var card_id: StringName = instance[&"card_id"] as StringName
+	var upgrade_id: StringName = instance.get(&"upgrade_id", &"") as StringName
+	var card: CardData = CardCatalog.create_card(card_id, int(instance[&"instance_id"]), upgrade_id)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.name = "DeckCard_%d" % card.instance_id
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _card_style(card.card_type, false))
+	var column: VBoxContainer = VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", 4)
+	panel.add_child(column)
+	var heading: Label = Label.new()
+	heading.text = "#%d　%s" % [card.instance_id, card.title]
+	heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	heading.add_theme_font_size_override("font_size", 21)
+	heading.add_theme_color_override("font_color", Color("f1e4c5"))
+	column.add_child(heading)
+	var metadata: Label = Label.new()
+	metadata.text = "类别：%s　｜　费用：%d　｜　稀有度：%s" % [card.type_name(), card.base_cost, card.rarity]
+	metadata.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	metadata.add_theme_color_override("font_color", Color("a9bdd0"))
+	column.add_child(metadata)
+	var rules: Label = Label.new()
+	rules.text = "规则：%s" % card.description
+	rules.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rules.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(rules)
+	return panel
+
+
+func _show_archive_screen(section: StringName = &"relics") -> void:
+	ui_mode = &"archive"
+	_clear_screen()
+	var archive_page: VBoxContainer = _create_page("远征档案", "地图状态、遗物与证据均来自当前远征规则状态。")
+	var content: VBoxContainer = _add_page_scroll(archive_page, "ArchiveContent")
+	var state: Label = Label.new()
+	state.text = "生命 %d/%d｜墨晶 %d｜牌组 %d 张｜已升级 %d 张｜当前第 %d 层｜已完成节点 %d 个" % [
+		run_model.player_hp, run_model.player_max_hp, run_model.ink_crystals,
+		run_model.deck_instances.size(), _upgraded_card_count(), run_model.current_node,
+		_completed_node_count(),
+	]
+	state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_child(state)
+	_add_archive_section(content, "遗物", _relic_entry_names(), section == &"relics")
+	_add_archive_section(content, "证据", run_model.evidence, section == &"evidence")
+	var footer: HBoxContainer = _add_page_footer(archive_page)
+	var deck: Button = _configure_button(Button.new())
+	deck.text = "查看牌组"
+	deck.pressed.connect(_show_deck_screen)
+	footer.add_child(deck)
+	var back: Button = _configure_button(Button.new())
+	back.text = "返回地图"
+	back.pressed.connect(_show_map_screen)
+	footer.add_child(back)
+
+
+func _add_archive_section(parent: VBoxContainer, heading_text: String, entries: Array, emphasized: bool) -> void:
+	var heading: Label = Label.new()
+	heading.text = heading_text
+	heading.add_theme_font_size_override("font_size", 24 if emphasized else 21)
+	heading.add_theme_color_override("font_color", Color("ffd27d") if emphasized else Color("e7d9b5"))
+	parent.add_child(heading)
+	if entries.is_empty():
+		var empty: Label = Label.new()
+		empty.text = "尚无记录"
+		empty.add_theme_color_override("font_color", Color("8295a8"))
+		parent.add_child(empty)
+		return
+	for entry: Variant in entries:
+		var label: Label = Label.new()
+		label.text = "• %s" % str(entry)
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		parent.add_child(label)
 
 
 func _on_map_node_pressed(node_id: StringName) -> void:
@@ -189,46 +335,59 @@ func _on_map_node_pressed(node_id: StringName) -> void:
 func _show_shop_screen() -> void:
 	ui_mode = &"shop"
 	_clear_screen()
-	var shop_page: VBoxContainer = VBoxContainer.new()
-	shop_page.add_theme_constant_override("separation", 8)
-	screen_root.add_child(shop_page)
-	_add_page_title(shop_page, "残页商店", "库存由节点种子冻结；售出不补。墨晶 %d" % run_model.ink_crystals)
+	var shop_page: VBoxContainer = _create_page(
+		"残页商店",
+		"库存由节点种子冻结；售出不补。当前墨晶：%d" % run_model.ink_crystals
+	)
+	var content: VBoxContainer = _add_page_scroll(shop_page, "ShopContent")
 	var shop: ShopModel = ShopModel.new(run_model.pending_shop_stock)
+	var stock_title: Label = Label.new()
+	stock_title.text = "冻结库存"
+	stock_title.add_theme_font_size_override("font_size", 23)
+	stock_title.add_theme_color_override("font_color", Color("e7d9b5"))
+	content.add_child(stock_title)
 	var cards: Array = run_model.pending_shop_stock.get(&"cards", [])
 	for index: int in range(cards.size()):
 		var item: Dictionary = cards[index]
 		var definition: Dictionary = CardCatalog.get_definition(item[&"card_id"] as StringName)
 		var reason: String = shop.card_unavailable_reason(run_model, index)
-		var button: Button = Button.new()
-		button.text = "%s｜%d 墨晶｜%s%s" % [definition[&"title"], item[&"price"], definition[&"description"], "｜不可用：%s" % reason if not reason.is_empty() else ""]
+		var button: Button = _configure_button(Button.new(), 64)
+		button.text = "%s｜%d 墨晶｜%s｜%s%s" % [
+			definition[&"title"], item[&"price"], CardData.type_display_name(int(definition[&"type"])),
+			definition[&"description"], "｜不可用：%s" % reason if not reason.is_empty() else "",
+		]
 		button.disabled = not reason.is_empty()
 		button.tooltip_text = reason
 		button.pressed.connect(_on_shop_card_pressed.bind(index))
-		shop_page.add_child(button)
+		content.add_child(button)
 	var relic: Dictionary = run_model.pending_shop_stock.get(&"relic", {})
 	var relic_reason: String = shop.relic_unavailable_reason(run_model)
-	var relic_button: Button = Button.new()
+	var relic_button: Button = _configure_button(Button.new(), 54)
 	relic_button.text = "%s｜%d 墨晶%s" % [RuleEngine.relic_title(relic[&"relic_id"] as StringName), relic[&"price"], "｜不可用：%s" % relic_reason if not relic_reason.is_empty() else ""]
 	relic_button.disabled = not relic_reason.is_empty()
 	relic_button.tooltip_text = relic_reason
 	relic_button.pressed.connect(_on_shop_relic_pressed)
-	shop_page.add_child(relic_button)
+	content.add_child(relic_button)
 	var service: Dictionary = run_model.pending_shop_stock.get(&"remove_service", {})
 	var remove_reason: String = shop.remove_unavailable_reason(run_model)
 	var remove_label: Label = Label.new()
-	remove_label.text = "移除服务｜%d 墨晶%s" % [service[&"price"], "｜不可用：%s" % remove_reason if not remove_reason.is_empty() else ""]
-	shop_page.add_child(remove_label)
+	remove_label.text = "移除服务｜%d 墨晶%s\n选择一个具体实例；长牌组可在此区域继续向下滚动。" % [service[&"price"], "｜不可用：%s" % remove_reason if not remove_reason.is_empty() else ""]
+	remove_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	remove_label.add_theme_font_size_override("font_size", 23)
+	remove_label.add_theme_color_override("font_color", Color("e7d9b5"))
+	content.add_child(remove_label)
 	for instance: Dictionary in run_model.deck_instances:
-		var remove_button: Button = Button.new()
+		var remove_button: Button = _configure_button(Button.new(), 60)
 		remove_button.text = "移除 %s" % run_model.describe_deck_instance(instance)
 		remove_button.disabled = not remove_reason.is_empty()
 		remove_button.tooltip_text = remove_reason
 		remove_button.pressed.connect(_on_shop_remove_pressed.bind(int(instance[&"instance_id"])))
-		shop_page.add_child(remove_button)
-	var leave: Button = Button.new()
+		content.add_child(remove_button)
+	var footer: HBoxContainer = _add_page_footer(shop_page)
+	var leave: Button = _configure_button(Button.new(), 48)
 	leave.text = "离开商店并返回地图"
 	leave.pressed.connect(_on_shop_leave_pressed)
-	shop_page.add_child(leave)
+	footer.add_child(leave)
 
 
 func _on_shop_card_pressed(index: int) -> void:
@@ -262,21 +421,31 @@ func _show_rest_upgrade_screen() -> void:
 func _show_upgrade_screen(mode: StringName) -> void:
 	ui_mode = mode
 	_clear_screen()
-	var upgrade_page: VBoxContainer = VBoxContainer.new()
-	upgrade_page.add_theme_constant_override("separation", 8)
-	screen_root.add_child(upgrade_page)
-	_add_page_title(upgrade_page, "锻造" if mode == &"forge" else "休整：升级", "选择具体未升级实例；每次只升级一张。")
-	for instance: Dictionary in run_model.get_unupgraded_instances():
+	var candidates: Array[Dictionary] = run_model.get_unupgraded_instances()
+	var upgrade_page: VBoxContainer = _create_page(
+		"锻造" if mode == &"forge" else "休整：升级",
+		"选择具体未升级实例；共 %d 个候选，每次只升级一张。" % candidates.size()
+	)
+	var list: VBoxContainer = _add_page_scroll(upgrade_page, "UpgradeList")
+	if candidates.is_empty():
+		var empty: Label = Label.new()
+		empty.text = "牌组中没有可升级实例。"
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		list.add_child(empty)
+	for instance: Dictionary in candidates:
 		var preview: Dictionary = run_model.get_upgrade_preview(int(instance[&"instance_id"]))
-		var button: Button = Button.new()
-		button.text = "#%d %s\n升级前：%s\n升级后：%s" % [instance[&"instance_id"], CardCatalog.get_definition(instance[&"card_id"] as StringName)[&"title"], preview[&"before"], preview[&"after"]]
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var button: Button = _configure_button(Button.new(), 92)
+		button.text = "#%d　%s\n升级前：%s\n升级后：%s" % [
+			instance[&"instance_id"], CardCatalog.get_definition(instance[&"card_id"] as StringName)[&"title"],
+			preview[&"before"], preview[&"after"],
+		]
 		button.pressed.connect(_on_upgrade_instance_pressed.bind(int(instance[&"instance_id"]), mode))
-		upgrade_page.add_child(button)
-	var skip: Button = Button.new()
-	skip.text = "没有可升级牌，离开" if run_model.get_unupgraded_instances().is_empty() else "跳过"
+		list.add_child(button)
+	var footer: HBoxContainer = _add_page_footer(upgrade_page)
+	var skip: Button = _configure_button(Button.new(), 48)
+	skip.text = "没有可升级牌，离开" if candidates.is_empty() else "跳过并返回地图"
 	skip.pressed.connect(_on_upgrade_skipped.bind(mode))
-	upgrade_page.add_child(skip)
+	footer.add_child(skip)
 
 
 func _on_upgrade_instance_pressed(instance_id: int, mode: StringName) -> void:
@@ -294,28 +463,27 @@ func _on_upgrade_skipped(mode: StringName) -> void:
 func _show_rest_screen() -> void:
 	ui_mode = &"rest"
 	_clear_screen()
-	var rest_page: VBoxContainer = VBoxContainer.new()
-	rest_page.alignment = BoxContainer.ALIGNMENT_CENTER
-	rest_page.add_theme_constant_override("separation", 14)
-	screen_root.add_child(rest_page)
-	_add_page_title(rest_page, "休整", "恢复20%最大生命、升级一张牌，或跳过。")
+	var rest_page: VBoxContainer = _create_page("休整", "恢复20%最大生命、升级一张牌，或跳过。")
+	var options: VBoxContainer = _add_page_scroll(rest_page, "RestOptions")
+	options.alignment = BoxContainer.ALIGNMENT_CENTER
 	var heal_amount: int = maxi(1, floori(float(run_model.player_max_hp) * 0.2))
-	var heal: Button = Button.new()
+	var heal: Button = _configure_button(Button.new(), 64)
 	heal.text = "恢复 %d 生命｜当前 %d/%d%s" % [heal_amount, run_model.player_hp, run_model.player_max_hp, "｜不可用：生命已满" if run_model.player_hp >= run_model.player_max_hp else ""]
 	heal.disabled = run_model.player_hp >= run_model.player_max_hp
 	heal.tooltip_text = "生命已满" if heal.disabled else ""
 	heal.pressed.connect(_on_rest_heal_pressed)
-	rest_page.add_child(heal)
-	var upgrade: Button = Button.new()
+	options.add_child(heal)
+	var upgrade: Button = _configure_button(Button.new(), 64)
 	upgrade.text = "升级一张未升级牌%s" % ("｜不可用：没有可升级实例" if run_model.get_unupgraded_instances().is_empty() else "")
 	upgrade.disabled = run_model.get_unupgraded_instances().is_empty()
 	upgrade.tooltip_text = "没有可升级实例" if upgrade.disabled else ""
 	upgrade.pressed.connect(_show_rest_upgrade_screen)
-	rest_page.add_child(upgrade)
-	var skip: Button = Button.new()
+	options.add_child(upgrade)
+	var footer: HBoxContainer = _add_page_footer(rest_page)
+	var skip: Button = _configure_button(Button.new(), 48)
 	skip.text = "跳过并返回地图"
 	skip.pressed.connect(_on_rest_skip_pressed)
-	rest_page.add_child(skip)
+	footer.add_child(skip)
 
 
 func _on_rest_heal_pressed() -> void:
@@ -331,15 +499,19 @@ func _on_rest_skip_pressed() -> void:
 func _show_boss_placeholder() -> void:
 	ui_mode = &"boss_placeholder"
 	_clear_screen()
-	var boss_page: VBoxContainer = VBoxContainer.new()
-	boss_page.alignment = BoxContainer.ALIGNMENT_CENTER
-	boss_page.add_theme_constant_override("separation", 18)
-	screen_root.add_child(boss_page)
-	_add_page_title(boss_page, "章节终点尚未接入", "M1 Boss占位：不冒充正式Boss战。")
-	var finish: Button = Button.new()
+	var boss_page: VBoxContainer = _create_page("章节终点尚未接入", "M1 Boss占位：不冒充正式Boss战。")
+	var content: VBoxContainer = _add_page_scroll(boss_page, "BossContent")
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	var note: Label = Label.new()
+	note.text = "你已经抵达第九层。此处只记录远征抵达，不运行尚未实现的正式 Boss 规则。"
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(note)
+	var footer: HBoxContainer = _add_page_footer(boss_page)
+	var finish: Button = _configure_button(Button.new(), 50)
 	finish.text = "记录抵达并结束本次骨架验证"
 	finish.pressed.connect(_on_boss_placeholder_finished)
-	boss_page.add_child(finish)
+	footer.add_child(finish)
 
 
 func _on_boss_placeholder_finished() -> void:
@@ -350,45 +522,47 @@ func _on_boss_placeholder_finished() -> void:
 func _show_expedition_complete_screen() -> void:
 	ui_mode = &"expedition_complete"
 	_clear_screen()
-	var complete_page: VBoxContainer = VBoxContainer.new()
-	complete_page.alignment = BoxContainer.ALIGNMENT_CENTER
-	complete_page.add_theme_constant_override("separation", 18)
-	screen_root.add_child(complete_page)
-	_add_page_title(complete_page, "已抵达章节终点", "正式Boss将在M2接入。")
+	var complete_page: VBoxContainer = _create_page("已抵达章节终点", "正式Boss将在M2接入。")
+	var content: VBoxContainer = _add_page_scroll(complete_page, "CompleteSummary")
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	var summary: Label = Label.new()
 	summary.text = run_model.get_summary_text()
-	complete_page.add_child(summary)
-	var back: Button = Button.new()
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(summary)
+	var relics: Label = Label.new()
+	relics.text = "遗物：%s\n证据：%s" % [_relic_names(), "无" if run_model.evidence.is_empty() else "、".join(run_model.evidence)]
+	relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	relics.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(relics)
+	var footer: HBoxContainer = _add_page_footer(complete_page)
+	var back: Button = _configure_button(Button.new())
 	back.text = "返回标题"
 	back.pressed.connect(_show_main_menu)
-	complete_page.add_child(back)
+	footer.add_child(back)
 
 
 func _show_test_arena_menu() -> void:
 	ui_mode = &"test_menu"
 	is_test_mode = false
 	_clear_screen()
-	var menu: VBoxContainer = VBoxContainer.new()
-	menu.alignment = BoxContainer.ALIGNMENT_CENTER
-	menu.add_theme_constant_override("separation", 14)
-	screen_root.add_child(menu)
-	_add_page_title(menu, "机制测试场", "选择对手。此处不计入远征，可集中练习已实现机制。")
+	var menu: VBoxContainer = _create_page("机制测试场", "选择对手。此处不计入远征，可集中练习已实现机制。")
+	var opponents: VBoxContainer = _add_page_scroll(menu, "TestOpponentList")
 	for arena_enemy_id: StringName in EnemyCatalog.TEST_ARENA_ENEMY_IDS:
 		var definition: EnemyDefinition = EnemyCatalog.create(arena_enemy_id)
-		var button: Button = Button.new()
+		var button: Button = _configure_button(Button.new(), 54)
 		button.text = "%s｜%s｜生命 %d～%d｜%d 个意图" % [
 			definition.display_name, definition.tier,
 			definition.hp_min, definition.hp_max, definition.intent_count(),
 		]
 		button.tooltip_text = _describe_enemy_traits(definition)
-		button.custom_minimum_size = Vector2(560, 50)
 		button.pressed.connect(_start_test_level.bind(arena_enemy_id))
-		menu.add_child(button)
-	var back: Button = Button.new()
+		opponents.add_child(button)
+	var footer: HBoxContainer = _add_page_footer(menu)
+	var back: Button = _configure_button(Button.new())
 	back.text = "返回标题"
-	back.custom_minimum_size = Vector2(200, 44)
 	back.pressed.connect(_show_main_menu)
-	menu.add_child(back)
+	footer.add_child(back)
 
 
 func _describe_enemy_traits(definition: EnemyDefinition) -> String:
@@ -455,6 +629,9 @@ func _start_current_battle() -> void:
 func _build_combat_screen() -> void:
 	_clear_screen()
 	page = VBoxContainer.new()
+	page.name = "CombatPage"
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page.add_theme_constant_override("separation", 8)
 	screen_root.add_child(page)
 
@@ -564,19 +741,19 @@ func _build_combat_screen() -> void:
 	page.add_child(footer)
 	result_label = Label.new()
 	result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	result_label.add_theme_color_override("font_color", Color("9cafc2"))
 	footer.add_child(result_label)
-	var restart_button: Button = Button.new()
+	var restart_button: Button = _configure_button(Button.new())
 	restart_button.text = "返回标题" if is_test_mode else "重新开始远征"
 	restart_button.pressed.connect(_on_restart_pressed)
 	footer.add_child(restart_button)
-	result_action_button = Button.new()
+	result_action_button = _configure_button(Button.new())
 	result_action_button.visible = false
 	result_action_button.pressed.connect(_on_battle_result_pressed)
 	footer.add_child(result_action_button)
-	end_turn_button = Button.new()
+	end_turn_button = _configure_button(Button.new())
 	end_turn_button.text = "结束回合"
-	end_turn_button.custom_minimum_size = Vector2(140, 44)
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	footer.add_child(end_turn_button)
 
@@ -715,42 +892,28 @@ func _on_battle_result_pressed() -> void:
 func _show_reward_screen() -> void:
 	ui_mode = &"reward"
 	_clear_screen()
-	var reward_page: VBoxContainer = VBoxContainer.new()
-	reward_page.add_theme_constant_override("separation", 18)
-	screen_root.add_child(reward_page)
-	_add_page_title(reward_page, "战后回收", "选择一张残页加入牌组，也可以跳过。")
-	var summary: Label = Label.new()
-	summary.text = run_model.get_summary_text()
-	summary.add_theme_color_override("font_color", Color("9cafc2"))
-	reward_page.add_child(summary)
-	var cards: HBoxContainer = HBoxContainer.new()
-	cards.alignment = BoxContainer.ALIGNMENT_CENTER
-	cards.add_theme_constant_override("separation", 18)
-	cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	reward_page.add_child(cards)
+	var reward_page: VBoxContainer = _create_page(
+		"战后回收",
+		"选择一张残页加入牌组，也可以跳过。生命 %d/%d｜墨晶 %d｜牌组 %d 张" % [
+			run_model.player_hp, run_model.player_max_hp, run_model.ink_crystals, run_model.deck_instances.size(),
+		]
+	)
+	var cards: VBoxContainer = _add_page_scroll(reward_page, "RewardList")
 	for index: int in range(run_model.pending_reward_ids.size()):
 		var card_id: StringName = run_model.pending_reward_ids[index]
 		var definition: Dictionary = CardCatalog.get_definition(card_id)
-		var button: Button = Button.new()
-		button.custom_minimum_size = Vector2(300, 300)
-		button.text = "%s
-[%s] 费用%d
-
-%s
-
-——
-%s" % [
-			definition[&"title"], definition[&"rarity"], definition[&"cost"],
-			definition[&"description"], definition[&"flavor"],
+		var button: Button = _configure_button(Button.new(), 132)
+		button.text = "%s｜%s｜%s｜费用 %d\n%s\n—— %s" % [
+			definition[&"title"], CardData.type_display_name(int(definition[&"type"])), definition[&"rarity"],
+			definition[&"cost"], definition[&"description"], definition[&"flavor"],
 		]
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.pressed.connect(_on_reward_chosen.bind(index))
 		cards.add_child(button)
-	var skip: Button = Button.new()
+	var footer: HBoxContainer = _add_page_footer(reward_page)
+	var skip: Button = _configure_button(Button.new(), 48)
 	skip.text = "跳过奖励"
-	skip.custom_minimum_size = Vector2(180, 48)
 	skip.pressed.connect(_on_reward_skipped)
-	reward_page.add_child(skip)
+	footer.add_child(skip)
 
 
 func _on_reward_chosen(index: int) -> void:
@@ -774,24 +937,22 @@ func _advance_after_interlude() -> void:
 
 func _show_path_transition() -> void:
 	_clear_screen()
-	var transition: VBoxContainer = VBoxContainer.new()
-	transition.alignment = BoxContainer.ALIGNMENT_CENTER
-	transition.add_theme_constant_override("separation", 22)
-	screen_root.add_child(transition)
 	var data: Dictionary = _get_path_transition_data(current_stage)
-	_add_page_title(transition, str(data[&"title"]), "无字之城 / 路径记录")
+	var transition: VBoxContainer = _create_page(str(data[&"title"]), "无字之城 / 路径记录")
+	var content: VBoxContainer = _add_page_scroll(transition, "PathRecord")
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	var body: Label = Label.new()
 	body.text = str(data[&"body"])
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.add_theme_font_size_override("font_size", 22)
 	body.add_theme_color_override("font_color", Color("d8e0e7"))
-	transition.add_child(body)
-	var proceed: Button = Button.new()
+	content.add_child(body)
+	var footer: HBoxContainer = _add_page_footer(transition)
+	var proceed: Button = _configure_button(Button.new(), 54)
 	proceed.text = "继续前行"
-	proceed.custom_minimum_size = Vector2(260, 54)
 	proceed.pressed.connect(_start_current_battle)
-	transition.add_child(proceed)
+	footer.add_child(proceed)
 
 
 func _get_path_transition_data(stage: int) -> Dictionary:
@@ -812,35 +973,40 @@ func _get_path_transition_data(stage: int) -> Dictionary:
 func _show_event_screen() -> void:
 	ui_mode = &"event"
 	_clear_screen()
-	var event_page: VBoxContainer = VBoxContainer.new()
-	event_page.add_theme_constant_override("separation", 18)
-	screen_root.add_child(event_page)
-	_add_page_title(event_page, run_model.get_event_title(), "纪元残骸 / 异常记录")
+	var event_page: VBoxContainer = _create_page(run_model.get_event_title(), "纪元残骸 / 异常记录")
+	var content: VBoxContainer = _add_page_scroll(event_page, "EventContent")
 	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.add_theme_stylebox_override("panel", _panel_style(Color("171f2b"), Color("536980"), 12))
-	event_page.add_child(panel)
+	content.add_child(panel)
 	var story: Label = Label.new()
 	story.text = run_model.get_event_story()
 	story.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	story.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	story.add_theme_font_size_override("font_size", 22)
 	story.add_theme_color_override("font_color", Color("d8e0e7"))
 	panel.add_child(story)
-	var options: VBoxContainer = VBoxContainer.new()
-	options.add_theme_constant_override("separation", 10)
-	event_page.add_child(options)
+	var options_title: Label = Label.new()
+	options_title.text = "可选行动"
+	options_title.add_theme_font_size_override("font_size", 23)
+	options_title.add_theme_color_override("font_color", Color("e7d9b5"))
+	content.add_child(options_title)
 	var option_data: Array[Dictionary] = run_model.get_event_options()
 	for index: int in range(option_data.size()):
 		var option: Dictionary = option_data[index]
-		var button: Button = Button.new()
+		var button: Button = _configure_button(Button.new(), 68)
 		button.text = "%s｜%s" % [option[&"label"], option[&"consequence"]]
 		button.disabled = not bool(option[&"enabled"])
 		button.tooltip_text = str(option[&"reason"])
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.custom_minimum_size = Vector2(0, 58)
 		button.pressed.connect(_on_event_choice.bind(index))
-		options.add_child(button)
+		content.add_child(button)
+	var footer: HBoxContainer = _add_page_footer(event_page)
+	var prompt: Label = Label.new()
+	prompt.text = "滚动查看完整记录与所有选项；选择后将立即结算。"
+	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	prompt.add_theme_color_override("font_color", Color("9cafc2"))
+	footer.add_child(prompt)
 
 
 func _on_event_choice(index: int) -> void:
@@ -851,46 +1017,96 @@ func _on_event_choice(index: int) -> void:
 func _show_summary_screen() -> void:
 	ui_mode = &"event_outcome"
 	_clear_screen()
-	var summary_page: VBoxContainer = VBoxContainer.new()
-	summary_page.alignment = BoxContainer.ALIGNMENT_CENTER
-	summary_page.add_theme_constant_override("separation", 22)
-	screen_root.add_child(summary_page)
-	_add_page_title(summary_page, "事件记录", "节点已经完成；路线后继已开放。")
+	var summary_page: VBoxContainer = _create_page("事件记录", "节点已经完成；路线后继已开放。")
+	var content: VBoxContainer = _add_page_scroll(summary_page, "EventOutcome")
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	var outcome: Label = Label.new()
 	outcome.text = run_model.event_outcome
 	outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	outcome.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	outcome.add_theme_font_size_override("font_size", 22)
 	outcome.add_theme_color_override("font_color", Color("d9c7a5"))
-	summary_page.add_child(outcome)
+	content.add_child(outcome)
 	var summary: Label = Label.new()
 	summary.text = run_model.get_summary_text()
+	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	summary.add_theme_color_override("font_color", Color("9cafc2"))
-	summary_page.add_child(summary)
+	content.add_child(summary)
 	if not run_model.evidence.is_empty():
 		var evidence_label: Label = Label.new()
 		evidence_label.text = "已记录证据：%s" % "、".join(run_model.evidence)
 		evidence_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		evidence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		summary_page.add_child(evidence_label)
-	var back: Button = Button.new()
+		content.add_child(evidence_label)
+	var footer: HBoxContainer = _add_page_footer(summary_page)
+	var back: Button = _configure_button(Button.new(), 50)
 	back.text = "返回地图"
-	back.custom_minimum_size = Vector2(240, 50)
 	back.pressed.connect(_show_map_screen)
-	summary_page.add_child(back)
+	footer.add_child(back)
+
+
+func _upgraded_card_count() -> int:
+	var count: int = 0
+	for instance: Dictionary in run_model.deck_instances:
+		if instance.get(&"upgrade_id", &"") != &"":
+			count += 1
+	return count
+
+
+func _completed_node_count() -> int:
+	var count: int = 0
+	if run_model.map_graph == null:
+		return count
+	for raw_node: Variant in run_model.map_graph.nodes_by_id.values():
+		if (raw_node as MapNode).completed:
+			count += 1
+	return count
+
+
+func _relic_entry_names() -> Array[String]:
+	var names: Array[String] = []
+	for relic_id: StringName in run_model.relics:
+		names.append(RuleEngine.relic_title(relic_id))
+	return names
+
+
+func _relic_names() -> String:
+	var names: Array[String] = _relic_entry_names()
+	return "无" if names.is_empty() else "、".join(names)
+
+
+func _add_profile_stat(parent: GridContainer, title: String, value: String) -> void:
+	var box: VBoxContainer = VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(box)
+	var title_label: Label = Label.new()
+	title_label.text = title
+	title_label.add_theme_font_size_override("font_size", 13)
+	title_label.add_theme_color_override("font_color", Color("7f96aa"))
+	box.add_child(title_label)
+	var value_label: Label = Label.new()
+	value_label.text = value
+	value_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	value_label.add_theme_font_size_override("font_size", 18)
+	value_label.add_theme_color_override("font_color", Color("e4ebf1"))
+	box.add_child(value_label)
 
 
 func _add_page_title(parent: VBoxContainer, heading: String, subtitle: String) -> void:
 	var title: Label = Label.new()
 	title.text = heading
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 32)
 	title.add_theme_color_override("font_color", Color("e7d9b5"))
 	parent.add_child(title)
 	var sub: Label = Label.new()
 	sub.text = subtitle
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sub.add_theme_color_override("font_color", Color("9cafc2"))
 	parent.add_child(sub)
 

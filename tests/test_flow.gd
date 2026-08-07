@@ -40,8 +40,9 @@ func _run() -> void:
 	await process_frame
 	_expect(not main.is_test_mode, "arena menu itself is not a battle")
 	var arena_menu: Node = main.screen_root.get_child(0)
+	var opponent_list: Node = arena_menu.get_node("PageScroll/TestOpponentList")
 	_expect(
-		arena_menu.get_child_count() >= EnemyCatalog.TEST_ARENA_ENEMY_IDS.size(),
+		opponent_list.get_child_count() == EnemyCatalog.TEST_ARENA_ENEMY_IDS.size(),
 		"arena menu lists every selectable opponent"
 	)
 	for arena_id: StringName in EnemyCatalog.TEST_ARENA_ENEMY_IDS:
