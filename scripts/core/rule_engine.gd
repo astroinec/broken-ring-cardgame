@@ -97,6 +97,9 @@ var relics: Array[StringName] = []
 var crack_stabilizer_used: bool = false
 var bookplate_used: bool = false
 
+var _relic_trigger_counts: Dictionary = {}
+var _relic_net_benefits: Dictionary = {}
+
 ## 最近一次计算的阶段轨迹，供日志与测试验证顺序。
 var last_trace: Array[String] = []
 
@@ -110,6 +113,8 @@ func reset_for_battle(p_relics: Array[StringName]) -> void:
 	enemy_next_attack_bonus = 0
 	crack_stabilizer_used = false
 	bookplate_used = false
+	_relic_trigger_counts.clear()
+	_relic_net_benefits.clear()
 	last_trace.clear()
 
 
@@ -237,6 +242,7 @@ func compute_instability_gain(base: int) -> int:
 	if base > 0 and not crack_stabilizer_used and has_relic(&"crack_stabilizer"):
 		crack_stabilizer_used = true
 		value -= 1
+		_record_relic_benefit(&"crack_stabilizer", 1)
 		_trace(Phase.RELIC, "裂纹稳定器 -1 → %d" % value)
 	else:
 		_trace(Phase.RELIC, "无超载类遗物修正")
@@ -252,7 +258,21 @@ func consume_bookplate_draw(card_type: int) -> int:
 	if not has_relic(&"wordless_bookplate"):
 		return 0
 	bookplate_used = true
+	_record_relic_benefit(&"wordless_bookplate", 1)
 	return 1
+
+
+## 返回规则层只读遥测快照。收益单位按遗物定义：稳定器为少获得的不稳定，藏书票为额外抽牌。
+func get_relic_telemetry() -> Dictionary:
+	return {
+		&"trigger_counts": _relic_trigger_counts.duplicate(),
+		&"net_benefits": _relic_net_benefits.duplicate(),
+	}
+
+
+func _record_relic_benefit(relic_id: StringName, benefit: int) -> void:
+	_relic_trigger_counts[relic_id] = int(_relic_trigger_counts.get(relic_id, 0)) + 1
+	_relic_net_benefits[relic_id] = int(_relic_net_benefits.get(relic_id, 0)) + benefit
 
 
 func advance_turn_statuses() -> Array[String]:

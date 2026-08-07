@@ -67,6 +67,9 @@ var exhausted_zone: Array[CardData] = []
 var log_entries: Array[String] = []
 var missing_name: Dictionary = {}
 
+var _telemetry_fractures: int = 0
+var _telemetry_card_uses: Dictionary = {}
+
 var last_card_type: int = -1
 var last_card_id: StringName = &""
 var last_card_base_cost: int = -1
@@ -139,6 +142,8 @@ func start_battle(
 	sealed_zone.clear()
 	exhausted_zone.clear()
 	log_entries.clear()
+	_telemetry_fractures = 0
+	_telemetry_card_uses.clear()
 	rule_engine.reset_for_battle(p_relics)
 	_configure_tutorial_stage()
 	_configure_enemy(p_enemy_id if p_enemy_id != &"" else EnemyCatalog.enemy_id_for_path_stage(tutorial_stage))
@@ -457,6 +462,7 @@ func _finish_card_play() -> void:
 			discard_pile.append(card)
 
 	cards_played_this_turn += 1
+	_telemetry_card_uses[card.id] = int(_telemetry_card_uses.get(card.id, 0)) + 1
 	if card.card_type == CardData.CardType.ATTACK:
 		attack_played_this_turn = true
 	if card.card_type != CardData.CardType.STATUS:
@@ -607,6 +613,17 @@ func get_sealed_summary() -> String:
 
 func get_player_status_text() -> String:
 	return rule_engine.get_status_text()
+
+
+## 返回规则层只读遥测快照；模拟与测试读取此处，不从日志或 UI 反推规则事件。
+func get_telemetry() -> Dictionary:
+	var relic_telemetry: Dictionary = rule_engine.get_relic_telemetry()
+	return {
+		&"fractures": _telemetry_fractures,
+		&"card_uses": _telemetry_card_uses.duplicate(),
+		&"relic_trigger_counts": relic_telemetry[&"trigger_counts"],
+		&"relic_net_benefits": relic_telemetry[&"net_benefits"],
+	}
 
 
 # ---------------------------------------------------------------------- 回合流程
@@ -979,6 +996,7 @@ func _check_fracture() -> void:
 	if instability < INSTABILITY_THRESHOLD or battle_over:
 		return
 	instability -= INSTABILITY_THRESHOLD
+	_telemetry_fractures += 1
 	var damage: int = rule_engine.compute_fracture_damage(FRACTURE_DAMAGE, prevent_next_fracture_damage)
 	if prevent_next_fracture_damage:
 		prevent_next_fracture_damage = false

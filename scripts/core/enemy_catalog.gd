@@ -228,7 +228,7 @@ const DEFINITIONS: Dictionary = {
 		],
 	},
 	&"reverse_reader": {
-		&"name": "倒读者", &"tier": "普通", &"hp_min": 28, &"hp_max": 32,
+		&"name": "倒读者", &"tier": "普通", &"hp_min": 68, &"hp_max": 72,
 		&"traits": [EnemyDefinition.TRAIT_REVERSE_READ],
 		&"intent_mode": EnemyDefinition.IntentMode.REVERSE_RECORD,
 		&"intro_line": "请从最后一句开始陈述。",
@@ -343,6 +343,32 @@ const DEFINITIONS: Dictionary = {
 						&"kind": EnemyOperation.Kind.CLEANSE_SELF,
 						&"log": "{enemy}移除了自身所有减益。",
 					},
+				],
+			},
+		],
+	},
+
+	# ---------- 数值模拟专用敌人：不进入 PATH_ENEMY_IDS 或 TEST_ARENA_ENEMY_IDS ----------
+	&"pressure_archivist": {
+		&"name": "压力校勘体", &"tier": "测试", &"hp_min": 112, &"hp_max": 112,
+		&"intro_line": "仅用于固定种子数值校准。",
+		&"intents": [
+			{
+				&"id": &"pressure_probe", &"name": "高压试探", &"description": "造成 9 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 9, &"action": "高压试探"},
+				],
+			},
+			{
+				&"id": &"pressure_pulse", &"name": "高压脉冲", &"description": "造成 10 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 10, &"action": "高压脉冲"},
+				],
+			},
+			{
+				&"id": &"pressure_smash", &"name": "高压重击", &"description": "造成 20 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 20, &"action": "高压重击"},
 				],
 			},
 		],

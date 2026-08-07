@@ -229,6 +229,10 @@ func _test_enemy_catalog_integrity() -> void:
 	for formal_id: StringName in [&"hollow_name_guard", &"reverse_reader", &"binding_instrument"]:
 		_expect(EnemyCatalog.TEST_ARENA_ENEMY_IDS.has(formal_id), "formal enemy %s is selectable in test arena" % formal_id)
 		_expect(not EnemyCatalog.PATH_ENEMY_IDS.has(formal_id), "formal enemy %s stays out of the main path" % formal_id)
+	_expect(EnemyCatalog.has_enemy(&"pressure_archivist"), "balance pressure enemy exists in the catalog")
+	_expect(not EnemyCatalog.PATH_ENEMY_IDS.has(&"pressure_archivist"), "balance pressure enemy stays out of the main path")
+	_expect(not EnemyCatalog.TEST_ARENA_ENEMY_IDS.has(&"pressure_archivist"), "balance pressure enemy stays out of the test arena menu")
+	_expect(EnemyCatalog.create(&"pressure_archivist").tier == "测试", "balance pressure enemy is marked test-only")
 
 
 func _test_intent_data_validity() -> void:
@@ -641,7 +645,7 @@ func _test_reverse_reader() -> void:
 		var model = CombatModelScript.new()
 		model.start_battle(86001, 6, bonus, &"reverse_reader", relics)
 		_expect(model.enemy_name == "倒读者", "reverse reader is loaded from the catalog")
-		_expect(model.enemy_max_hp >= 28 and model.enemy_max_hp <= 32, "reverse reader hp sits in its designed range")
+		_expect(model.enemy_max_hp >= 68 and model.enemy_max_hp <= 72, "reverse reader hp sits in its calibrated range")
 		_expect(model.reverse_record_type < 0, "reverse reader starts with no record")
 		_prepare_hand(model, [case[&"card"] as StringName])
 		_expect(model.play_card(0), "record card %s can be played" % case[&"card"])
