@@ -488,7 +488,7 @@ func _build_combat_screen() -> void:
 	stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("182332"), Color("40566e"), 8))
 	page.add_child(stats_panel)
 	var stats: HBoxContainer = HBoxContainer.new()
-	stats.add_theme_constant_override("separation", 24)
+	stats.add_theme_constant_override("separation", 8)
 	stats_panel.add_child(stats)
 	_add_stat(stats, "生命", "%d / %d" % [model.player_hp, model.player_max_hp])
 	_add_stat(stats, "稳定度", "%d / %d" % [model.energy, CombatModel.BASE_ENERGY])
@@ -897,7 +897,8 @@ func _add_page_title(parent: VBoxContainer, heading: String, subtitle: String) -
 
 func _add_stat(parent: HBoxContainer, title: String, value: String) -> void:
 	var box: VBoxContainer = VBoxContainer.new()
-	box.custom_minimum_size = Vector2(170, 52)
+	box.custom_minimum_size = Vector2(0, 52)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(box)
 	var title_label: Label = Label.new()
 	title_label.text = title

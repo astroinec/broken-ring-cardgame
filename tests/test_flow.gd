@@ -21,6 +21,8 @@ func _run() -> void:
 	_expect(main.is_test_mode, "test level uses independent mode")
 	_expect(main.current_stage == CombatModel.TUTORIAL_STAGE_MAX, "test level opens full-mechanic encounter")
 	_expect(main.model.is_mechanic_unlocked(&"missing_name"), "test level unlocks all implemented mechanics")
+	_expect(main.page.get_combined_minimum_size().x <= 1240.0, "combat page minimum width fits inside 1280 viewport margins")
+	_expect(main.screen_root.size.x <= 1280.0, "combat controls do not force the root wider than the logical viewport")
 	main._restart_run()
 	await process_frame
 	_expect(not main.is_test_mode, "main route is separate from test mode")
