@@ -127,7 +127,19 @@ const DEFINITIONS: Dictionary = {
 		&"description": "不可打出。抽到时获得 1 层缺名；消逝。", &"rarity": "状态", &"exhausts": true,
 		&"flavor": "此处内容从未存在。",
 	},
+	&"blank_page": {
+		&"title": "空页", &"type": CardData.CardType.STATUS, &"cost": 1,
+		&"description": "消逝。无其他效果。", &"rarity": "状态", &"exhausts": true,
+		&"flavor": "纸面完好。它只是拒绝承载任何名字。",
+	},
+	&"old_wound": {
+		&"title": "旧伤", &"type": CardData.CardType.STATUS, &"cost": 1,
+		&"description": "消逝。若回合结束时仍在手牌，受到 2 点伤害。", &"rarity": "状态", &"exhausts": true,
+		&"flavor": "这具身体的伤口，比这具身体更早登记。",
+	},
 }
+
+const STATUS_IDS: Array[StringName] = [&"redaction", &"blank_page", &"old_wound"]
 
 
 static func has_card(card_id: StringName) -> bool:

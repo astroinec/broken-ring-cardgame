@@ -46,7 +46,11 @@ func _init(
 
 
 func type_name() -> String:
-	match card_type:
+	return type_display_name(card_type)
+
+
+static func type_display_name(p_card_type: int) -> String:
+	match p_card_type:
 		CardType.ATTACK:
 			return "攻式"
 		CardType.DEFENSE:
@@ -55,4 +59,4 @@ func type_name() -> String:
 			return "律式"
 		CardType.STATUS:
 			return "状态"
-	return "未知"
+	return "未知类别"

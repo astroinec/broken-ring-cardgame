@@ -8,6 +8,8 @@ var model: CombatModel
 var run_model: RunModel
 var current_stage: int = CombatModel.TUTORIAL_STAGE_MIN
 var is_test_mode: bool = false
+## 机制测试场当前选定的对手；主线节点始终使用路径目录中的敌人。
+var test_arena_enemy_id: StringName = EnemyCatalog.TEST_ARENA_ENEMY_IDS[0]
 var screen_root: MarginContainer
 var page: VBoxContainer
 var hand_box: HBoxContainer
@@ -78,7 +80,7 @@ func _show_main_menu() -> void:
 	test_button.text = "机制测试场"
 	test_button.custom_minimum_size = Vector2(360, 52)
 	test_button.tooltip_text = "独立于主线，集中体验当前已实现的核心牌组机制。"
-	test_button.pressed.connect(_start_test_level)
+	test_button.pressed.connect(_show_test_arena_menu)
 	menu.add_child(test_button)
 	var note: Label = Label.new()
 	note.text = "主线机制会随路径、敌人与获得的残页自然出现；测试场不计入故事。"
@@ -95,8 +97,56 @@ func _restart_run() -> void:
 	_start_current_battle()
 
 
-func _start_test_level() -> void:
+func _show_test_arena_menu() -> void:
+	is_test_mode = false
+	_clear_screen()
+	var menu: VBoxContainer = VBoxContainer.new()
+	menu.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu.add_theme_constant_override("separation", 14)
+	screen_root.add_child(menu)
+	_add_page_title(menu, "机制测试场", "选择对手。此处不计入远征，可集中练习已实现机制。")
+	for arena_enemy_id: StringName in EnemyCatalog.TEST_ARENA_ENEMY_IDS:
+		var definition: EnemyDefinition = EnemyCatalog.create(arena_enemy_id)
+		var button: Button = Button.new()
+		button.text = "%s｜%s｜生命 %d～%d｜%d 个意图" % [
+			definition.display_name, definition.tier,
+			definition.hp_min, definition.hp_max, definition.intent_count(),
+		]
+		button.tooltip_text = _describe_enemy_traits(definition)
+		button.custom_minimum_size = Vector2(560, 50)
+		button.pressed.connect(_start_test_level.bind(arena_enemy_id))
+		menu.add_child(button)
+	var back: Button = Button.new()
+	back.text = "返回标题"
+	back.custom_minimum_size = Vector2(200, 44)
+	back.pressed.connect(_show_main_menu)
+	menu.add_child(back)
+
+
+func _describe_enemy_traits(definition: EnemyDefinition) -> String:
+	var parts: Array[String] = []
+	if definition.has_trait(EnemyDefinition.TRAIT_DEVOUR):
+		parts.append("吞字记录：首次被某类别命中后记录该类别。")
+	if definition.has_trait(EnemyDefinition.TRAIT_STONE_SHELL):
+		parts.append("石壳%d，每回合恢复 %d；同式适应 +%d 格挡，换类别则失去全部石壳。" % [
+			definition.stone_shell_initial, definition.stone_shell_regen,
+			definition.stone_shell_adapt_block,
+		])
+	if definition.has_trait(EnemyDefinition.TRAIT_REVERSE_READ):
+		parts.append("倒读记录：依据你上一回合最后一张非状态牌改变意图。")
+	if definition.has_trait(EnemyDefinition.TRAIT_BINDING):
+		parts.append("装订：单回合额外抽牌达到 %d 张时，一张《%s》进入弃牌堆。" % [
+			definition.binding_draw_threshold,
+			CardCatalog.get_definition(definition.binding_card_id)[&"title"],
+		])
+	if parts.is_empty():
+		return definition.intro_line
+	return "\n".join(parts)
+
+
+func _start_test_level(arena_enemy_id: StringName = EnemyCatalog.TEST_ARENA_ENEMY_IDS[0]) -> void:
 	is_test_mode = true
+	test_arena_enemy_id = arena_enemy_id
 	run_model = RunModelScript.new()
 	run_model.start_run(RunModel.DEFAULT_SEED)
 	current_stage = CombatModel.TUTORIAL_STAGE_MAX
@@ -105,7 +155,13 @@ func _start_test_level() -> void:
 
 func _start_current_battle() -> void:
 	model = CombatModelScript.new()
-	model.start_battle(CombatModel.DEFAULT_SEED + current_stage, current_stage, run_model.get_acquired_card_ids())
+	model.start_battle(
+		CombatModel.DEFAULT_SEED + current_stage,
+		current_stage,
+		run_model.get_acquired_card_ids(),
+		test_arena_enemy_id if is_test_mode else &"",
+		run_model.get_relic_ids()
+	)
 	_build_combat_screen()
 	_refresh_combat()
 
@@ -131,7 +187,12 @@ func _build_combat_screen() -> void:
 	header.add_child(stage_label)
 
 	var hint_label: Label = Label.new()
-	hint_label.text = "测试说明｜稳定度、超载、封存、回响与缺名均已开放。" if is_test_mode else "现场记录｜%s" % model.tutorial_hint
+	if is_test_mode:
+		hint_label.text = "测试说明｜稳定度、超载、封存、回响、缺名与目标选择均已开放。对手：%s。遗物：%s。" % [
+			model.enemy_name, model.rule_engine.get_relic_text(),
+		]
+	else:
+		hint_label.text = "现场记录｜%s" % model.tutorial_hint
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint_label.add_theme_font_size_override("font_size", 16)
 	hint_label.add_theme_color_override("font_color", Color("a9bdd0"))
@@ -148,6 +209,7 @@ func _build_combat_screen() -> void:
 	_add_stat(stats, "格挡", str(model.player_block))
 	_add_stat(stats, "不稳定", "%d / %d" % [model.instability, CombatModel.INSTABILITY_THRESHOLD] if model.is_mechanic_unlocked(&"overload") else "读数稳定")
 	_add_stat(stats, "牌堆", "抽%d 弃%d 逝%d" % [model.draw_pile.size(), model.discard_pile.size(), model.exhausted_zone.size()])
+	_add_stat(stats, "状态", model.get_player_status_text())
 	_add_stat(stats, "远征", "牌%d 墨晶%d" % [run_model.deck_instances.size(), run_model.ink_crystals])
 
 	var middle: HBoxContainer = HBoxContainer.new()
@@ -164,7 +226,11 @@ func _build_combat_screen() -> void:
 	enemy_column.add_theme_constant_override("separation", 9)
 	enemy_panel.add_child(enemy_column)
 	_add_centered(enemy_column, model.enemy_name, 28, Color("f2bdc8"))
-	_add_centered(enemy_column, "生命 %d/%d　格挡 %d" % [model.enemy_hp, model.enemy_max_hp, model.enemy_block], 18, Color("e4d4d8"))
+	_add_centered(
+		enemy_column,
+		"生命 %d/%d　格挡 %d" % [model.enemy_hp, model.enemy_max_hp, model.get_enemy_total_block()],
+		18, Color("e4d4d8")
+	)
 	if model.is_mechanic_unlocked(&"missing_name"):
 		_add_centered(enemy_column, "%s｜%s" % [model.get_enemy_record_text(), model.get_missing_name_text()], 16, Color("e0a9ba"))
 	if model.is_mechanic_unlocked(&"intent"):
@@ -190,7 +256,7 @@ func _build_combat_screen() -> void:
 	var zone_row: HBoxContainer = HBoxContainer.new()
 	page.add_child(zone_row)
 	var hand_title: Label = Label.new()
-	hand_title.text = "手牌（点击打出）"
+	hand_title.text = "选择目标（点击确认，或取消）" if model.has_pending_selection() else "手牌（点击打出）"
 	hand_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hand_title.add_theme_color_override("font_color", Color("d7c9a9"))
 	zone_row.add_child(hand_title)
@@ -231,31 +297,22 @@ func _build_combat_screen() -> void:
 
 func _refresh_combat() -> void:
 	_build_combat_screen()
-	for index: int in range(model.hand.size()):
-		var card: CardData = model.hand[index]
-		var button: Button = Button.new()
-		var cost: int = model.get_card_cost(card)
-		button.custom_minimum_size = Vector2(184, 135)
-		button.text = "%s
-[%s·%s] 费用%d
-
-%s" % [card.title, card.type_name(), card.rarity, cost, card.description]
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.tooltip_text = "%s
-
-%s" % [card.flavor_text, card.description]
-		button.disabled = model.battle_over or cost > model.energy
-		button.add_theme_font_size_override("font_size", 15)
-		button.add_theme_stylebox_override("normal", _card_style(card.card_type, false))
-		button.add_theme_stylebox_override("hover", _card_style(card.card_type, true))
-		button.pressed.connect(_on_card_pressed.bind(index))
-		hand_box.add_child(button)
+	# 规则层是唯一真相源：UI 只询问“现在是否有待选择请求”，
+	# 并把玩家点击原样转交给规则层，自己不保存任何选择状态。
+	if model.has_pending_selection():
+		_build_selection_row()
+	else:
+		_build_hand_row()
 	var joined_log: String = ""
 	for entry: String in model.log_entries:
 		joined_log += entry + "\n"
 	log_view.text = joined_log
-	end_turn_button.disabled = model.battle_over
-	if model.battle_over:
+	end_turn_button.disabled = model.battle_over or model.has_pending_selection()
+	if model.has_pending_selection():
+		result_action_button.visible = false
+		result_label.text = "选择模式｜%s（可取消）" % model.get_pending_prompt()
+		result_label.add_theme_color_override("font_color", Color("ffd27d"))
+	elif model.battle_over:
 		result_action_button.visible = true
 		if model.victory:
 			result_label.text = "测试完成。" if is_test_mode else "战斗胜利。结算后继续深入。"
@@ -268,6 +325,70 @@ func _refresh_combat() -> void:
 	else:
 		result_action_button.visible = false
 		result_label.text = "第%d回合｜每回合3稳定度" % model.turn_number
+
+
+func _build_hand_row() -> void:
+	for index: int in range(model.hand.size()):
+		var card: CardData = model.hand[index]
+		var button: Button = Button.new()
+		var cost: int = model.get_card_cost(card)
+		var unplayable: bool = card.card_type == CardData.CardType.STATUS and card.base_cost >= 99
+		button.custom_minimum_size = Vector2(184, 135)
+		button.text = "%s
+[%s·%s] %s
+
+%s" % [
+			card.title, card.type_name(), card.rarity,
+			"不可打出" if unplayable else "费用%d" % cost, card.description,
+		]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.tooltip_text = "%s
+
+%s" % [card.flavor_text, card.description]
+		button.disabled = model.battle_over or unplayable or cost > model.energy
+		button.add_theme_font_size_override("font_size", 15)
+		button.add_theme_stylebox_override("normal", _card_style(card.card_type, false))
+		button.add_theme_stylebox_override("hover", _card_style(card.card_type, true))
+		button.pressed.connect(_on_card_pressed.bind(index))
+		hand_box.add_child(button)
+
+
+## 选择模式：手牌区替换为候选目标按钮加一个取消按钮。
+func _build_selection_row() -> void:
+	var candidate_indices: Array[int] = model.get_pending_candidate_indices()
+	var candidate_labels: Array[String] = model.get_pending_candidate_labels()
+	for slot: int in range(candidate_indices.size()):
+		var button: Button = Button.new()
+		button.custom_minimum_size = Vector2(184, 135)
+		button.text = "选择
+%s" % candidate_labels[slot]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.add_theme_font_size_override("font_size", 15)
+		button.add_theme_stylebox_override("normal", _panel_style(Color("2c3a26"), Color("8fc27a"), 9))
+		button.add_theme_stylebox_override("hover", _panel_style(Color("3b4f33"), Color("b0dc9b"), 9))
+		button.pressed.connect(_on_selection_confirmed.bind(candidate_indices[slot]))
+		hand_box.add_child(button)
+	var cancel: Button = Button.new()
+	cancel.custom_minimum_size = Vector2(184, 135)
+	cancel.text = "取消
+
+该牌不结算，返还稳定度并放回手牌。"
+	cancel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cancel.add_theme_font_size_override("font_size", 15)
+	cancel.add_theme_stylebox_override("normal", _panel_style(Color("3a2a2a"), Color("b98080"), 9))
+	cancel.add_theme_stylebox_override("hover", _panel_style(Color("4d3636"), Color("d59a9a"), 9))
+	cancel.pressed.connect(_on_selection_cancelled)
+	hand_box.add_child(cancel)
+
+
+func _on_selection_confirmed(target_index: int) -> void:
+	model.resolve_pending_selection(target_index)
+	_refresh_combat()
+
+
+func _on_selection_cancelled() -> void:
+	model.cancel_pending_selection()
+	_refresh_combat()
 
 
 func _on_restart_pressed() -> void:

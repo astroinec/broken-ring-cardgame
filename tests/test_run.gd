@@ -12,6 +12,7 @@ func _init() -> void:
 	_test_reward_enters_later_battle()
 	_test_deterministic_event()
 	_test_event_branches()
+	_test_starting_relics()
 	if failures == 0:
 		print("PASS: all run, reward, and event checks")
 		quit(0)
@@ -100,6 +101,21 @@ func _test_event_branches() -> void:
 	var gated_options: Array[Dictionary] = gated.get_event_options()
 	_expect(not bool(gated_options[2][&"enabled"]), "conditional event option is disabled without relic")
 	_expect(not gated.apply_event_choice(2), "disabled event option cannot resolve")
+
+
+func _test_starting_relics() -> void:
+	var run = RunModelScript.new()
+	run.start_run(73103)
+	_expect(not run.get_relic_ids().is_empty(), "run begins with a starting relic")
+	for relic_id: StringName in run.get_relic_ids():
+		_expect(RuleEngine.RELIC_DEFINITIONS.has(relic_id), "starting relic %s exists in the rule engine" % relic_id)
+		_expect(RuleEngine.is_relic_implemented(relic_id), "starting relic %s is wired into the pipeline" % relic_id)
+	_expect(run.get_relic_ids().has(&"crack_stabilizer"), "crack stabilizer is the starting relic")
+	# 遗物必须真的进入战斗的规则引擎。
+	var battle: CombatModel = CombatModel.new()
+	var no_cards: Array[StringName] = []
+	battle.start_battle(73103, 3, no_cards, &"", run.get_relic_ids())
+	_expect(battle.rule_engine.has_relic(&"crack_stabilizer"), "battle rule engine receives run relics")
 
 
 func _expect(condition: bool, label: String) -> void:

@@ -8,6 +8,8 @@ const EVENT_IDS: Array[StringName] = [&"authorless_book", &"seventh_dock", &"cal
 const RARE_REWARD_IDS: Array[StringName] = [
 	&"critical_permission", &"dissolution_protocol", &"prewritten_ending", &"unseal_order", &"homophone",
 ]
+## 载律者的起始遗物；已接入 RuleEngine 的规则优先级管线。
+const STARTING_RELIC_IDS: Array[StringName] = [&"crack_stabilizer"]
 
 var seed_value: int = DEFAULT_SEED
 var current_node: int = 0
@@ -46,8 +48,14 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 	player_hp = 70
 	next_battle_missing_name = 0
 	completed_battles.clear()
+	for relic_id: StringName in STARTING_RELIC_IDS:
+		relics.append(relic_id)
 	for card_id: StringName in CardCatalog.STARTER_IDS:
 		_add_deck_card(card_id, false)
+
+
+func get_relic_ids() -> Array[StringName]:
+	return relics.duplicate()
 
 
 func get_deck_card_ids() -> Array[StringName]:
