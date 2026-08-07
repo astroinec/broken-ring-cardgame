@@ -8,6 +8,9 @@ func _init() -> void:
 
 
 func _run() -> void:
+	_expect(int(ProjectSettings.get_setting("display/window/size/window_width_override")) <= 960, "default window fits compact desktop width")
+	_expect(int(ProjectSettings.get_setting("display/window/size/window_height_override")) <= 540, "default window fits compact desktop height")
+	_expect(str(ProjectSettings.get_setting("display/window/stretch/aspect")) == "keep", "window resizing preserves 16:9 viewport aspect")
 	var scene: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var main = scene.instantiate()
 	root.add_child(main)
