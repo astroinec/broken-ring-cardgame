@@ -8,6 +8,8 @@
 
 需要 Godot 4.7.x 标准版（非 .NET 版），无第三方插件、无网络依赖。
 
+macOS 日常游玩最简单的方法：在Finder中双击项目根目录的 `PLAY.command`。首次运行若系统询问是否打开，选择允许即可。也可以用Godot编辑器打开 `project.godot` 后按 `F6/F5`。
+
 ```bash
 GODOT=/Applications/Godot.app/Contents/MacOS/Godot
 PROJECT=.
