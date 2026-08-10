@@ -869,7 +869,8 @@ func _build_combat_screen() -> void:
 	page.name = "CombatPage"
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	page.add_theme_constant_override("separation", 8)
+	# Boss的长意图和遗物HUD会共同占用纵向空间；保持紧凑，确保720逻辑视口内底部操作始终可见。
+	page.add_theme_constant_override("separation", 4)
 	screen_root.add_child(page)
 
 	var header: HBoxContainer = HBoxContainer.new()
@@ -904,7 +905,7 @@ func _build_combat_screen() -> void:
 	var relic_hud: RichTextLabel = RichTextLabel.new()
 	relic_hud.name = "RelicHUD"
 	relic_hud.text = model.get_relic_hud_text()
-	relic_hud.custom_minimum_size = Vector2(0, 42)
+	relic_hud.custom_minimum_size = Vector2(0, 34)
 	relic_hud.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	relic_hud.scroll_active = true
 	relic_hud.add_theme_font_size_override("normal_font_size", 14)
@@ -983,6 +984,7 @@ func _build_combat_screen() -> void:
 	zone_row.add_child(sealed_label)
 
 	var hand_scroll: ScrollContainer = ScrollContainer.new()
+	hand_scroll.name = "CombatHandScroll"
 	hand_scroll.custom_minimum_size = Vector2(0, 145)
 	hand_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -992,6 +994,7 @@ func _build_combat_screen() -> void:
 	hand_scroll.add_child(hand_box)
 
 	var footer: HBoxContainer = HBoxContainer.new()
+	footer.name = "CombatFooter"
 	page.add_child(footer)
 	result_label = Label.new()
 	result_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1007,6 +1010,7 @@ func _build_combat_screen() -> void:
 	result_action_button.pressed.connect(_on_battle_result_pressed)
 	footer.add_child(result_action_button)
 	end_turn_button = _configure_button(Button.new())
+	end_turn_button.name = "EndTurnButton"
 	end_turn_button.text = "结束回合"
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	footer.add_child(end_turn_button)
@@ -1044,7 +1048,22 @@ func _refresh_combat() -> void:
 			result_action_button.text = "重试当前场"
 	else:
 		result_action_button.visible = false
-		result_label.text = "第%d回合｜每回合3稳定度" % model.turn_number
+		if not _has_playable_hand_card():
+			result_label.text = "无可打出的牌｜请结束回合"
+			result_label.add_theme_color_override("font_color", Color("ffd27d"))
+			end_turn_button.text = "结束回合（恢复3稳定度）"
+		else:
+			result_label.text = "第%d回合｜每回合3稳定度" % model.turn_number
+			result_label.add_theme_color_override("font_color", Color("9cafc2"))
+			end_turn_button.text = "结束回合"
+
+
+func _has_playable_hand_card() -> bool:
+	for card: CardData in model.hand:
+		var unplayable: bool = card.card_type == CardData.CardType.STATUS and card.base_cost >= 99
+		if not unplayable and model.get_card_cost(card) <= model.energy:
+			return true
+	return false
 
 
 func _build_hand_row() -> void:
@@ -1065,14 +1084,24 @@ func _build_hand_row() -> void:
 		var recovery_text: String = model.get_card_boss_edit_text(card)
 		if not recovery_text.is_empty():
 			button.text += "\n%s" % recovery_text
+		var unavailable_reason: String = ""
+		if unplayable:
+			unavailable_reason = "状态牌不可主动打出"
+		elif cost > model.energy:
+			unavailable_reason = "稳定度不足：需要%d，当前%d" % [cost, model.energy]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.tooltip_text = "%s
 
-%s" % [card.flavor_text, card.description]
-		button.disabled = model.battle_over or unplayable or cost > model.energy
+%s%s" % [
+			card.flavor_text, card.description,
+			"\n\n不可打出：%s" % unavailable_reason if not unavailable_reason.is_empty() else "",
+		]
+		button.disabled = model.battle_over or not unavailable_reason.is_empty()
 		button.add_theme_font_size_override("font_size", 15)
 		button.add_theme_stylebox_override("normal", _card_style(card.card_type, false))
 		button.add_theme_stylebox_override("hover", _card_style(card.card_type, true))
+		button.add_theme_stylebox_override("disabled", _card_style(card.card_type, false))
+		button.add_theme_color_override("font_disabled_color", Color("aeb8c2"))
 		button.pressed.connect(_on_card_pressed.bind(index))
 		hand_box.add_child(button)
 

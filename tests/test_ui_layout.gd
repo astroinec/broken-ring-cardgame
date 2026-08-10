@@ -163,6 +163,26 @@ func _run() -> void:
 			_expect(relic_hud.text.contains(str(RelicCatalog.get_definition(relic_id)[&"title"])), "RelicHUD lays out %s" % relic_id)
 		_expect(relic_hud.text.contains("可能仍被后续裂解杀死"), "RelicHUD keeps explicit return bell warning")
 
+	# 回归用户实测：删名者第二阶段长意图+全部遗物+0稳定度时，底部结束回合曾被挤出720视口。
+	main.is_test_mode = false
+	main.model.start_battle(73109, CombatModel.TUTORIAL_STAGE_MAX, relic_bonus_cards, &"name_eraser", all_relics)
+	main.model.boss_phase = 2
+	main.model.enemy_hp = 54
+	main.model.player_hp = 8
+	main.model.energy = 0
+	main._refresh_combat()
+	await process_frame
+	var combat_footer: Control = _find_named(main.screen_root, "CombatFooter") as Control
+	var end_turn: Button = _find_named(main.screen_root, "EndTurnButton") as Button
+	_expect(main.screen_root.size.y <= 720.0, "Boss long-intent layout does not heighten root beyond logical viewport")
+	_expect(main.page.get_combined_minimum_size().y <= 696.0, "Boss combat page fits inside vertical margins")
+	_expect(combat_footer != null and combat_footer.position.y + combat_footer.size.y <= main.page.size.y + 0.5, "Boss combat footer remains inside viewport")
+	_expect(end_turn != null and end_turn.visible and not end_turn.disabled, "zero-energy Boss state keeps End Turn visible and enabled")
+	_expect(_tree_contains_text(main.screen_root, "无可打出的牌｜请结束回合"), "zero-energy state explains why cards are disabled")
+	if main.hand_box.get_child_count() > 0:
+		var disabled_card: Button = main.hand_box.get_child(0) as Button
+		_expect(disabled_card.disabled and disabled_card.tooltip_text.contains("稳定度不足"), "disabled card exposes its exact energy reason")
+
 	var corrupt_file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
 	corrupt_file.store_string("{broken save")
 	corrupt_file.close()
