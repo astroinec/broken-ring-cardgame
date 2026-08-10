@@ -10,10 +10,10 @@ const COMMON_CARD_IDS: Array[StringName] = [
 const RARE_CARD_IDS: Array[StringName] = [
 	&"critical_permission", &"dissolution_protocol", &"prewritten_ending", &"unseal_order", &"homophone",
 ]
-const RELIC_IDS: Array[StringName] = [&"wordless_bookplate"]
 
-
-static func generate(content_seed: int, remove_count: int) -> Dictionary:
+static func generate(
+	content_seed: int, remove_count: int, owned_relics: Array[StringName] = []
+) -> Dictionary:
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = content_seed
 	var common_pool: Array[StringName] = COMMON_CARD_IDS.duplicate()
@@ -29,11 +29,15 @@ static func generate(content_seed: int, remove_count: int) -> Dictionary:
 	else:
 		var final_index: int = rng.randi_range(0, common_pool.size() - 1)
 		cards.append(_card_stock(common_pool[final_index], rng.randi_range(35, 45)))
-	var relic_id: StringName = RELIC_IDS[rng.randi_range(0, RELIC_IDS.size() - 1)]
+	var relic_stock: Dictionary = {}
+	var relic_pool: Array[StringName] = RelicCatalog.get_shop_offer_ids(owned_relics)
+	if not relic_pool.is_empty():
+		var relic_id: StringName = relic_pool[rng.randi_range(0, relic_pool.size() - 1)]
+		relic_stock = {&"relic_id": relic_id, &"price": rng.randi_range(130, 170), &"sold": false}
 	return {
 		&"content_seed": content_seed,
 		&"cards": cards,
-		&"relic": {&"relic_id": relic_id, &"price": rng.randi_range(130, 170), &"sold": false},
+		&"relic": relic_stock,
 		&"remove_service": {&"price": 75 + remove_count * 25, &"sold": false},
 	}
 

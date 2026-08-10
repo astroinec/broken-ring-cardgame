@@ -16,6 +16,7 @@ const RARE_REWARD_IDS: Array[StringName] = [
 const STARTING_RELIC_IDS: Array[StringName] = [&"crack_stabilizer"]
 const NORMAL_BATTLE_INCOME: int = 12
 const ELITE_BATTLE_INCOME: int = 30
+const ELITE_RELIC_FALLBACK_INCOME: int = 50
 const REST_SALVAGE_INCOME: int = 30
 const MAX_SAVE_HP: int = 999
 const MAX_SAVE_INK: int = 1_000_000
@@ -286,15 +287,19 @@ func load_from_save_dict(data: Dictionary) -> String:
 		parsed_acquired.append(card_id)
 
 	var parsed_relics: Array[StringName] = []
+	var seen_relics: Dictionary = {}
 	for raw_relic_id: Variant in data["relics"]:
 		if typeof(raw_relic_id) != TYPE_STRING:
 			return "relics包含非字符串"
 		var relic_id: StringName = StringName(str(raw_relic_id))
-		if not RuleEngine.RELIC_DEFINITIONS.has(relic_id):
+		if not RelicCatalog.has_relic(relic_id):
 			return "存档包含未知遗物：%s" % relic_id
+		if seen_relics.has(relic_id):
+			return "存档包含重复遗物：%s" % relic_id
+		seen_relics[relic_id] = true
 		parsed_relics.append(relic_id)
 	var reward_relic_id: StringName = StringName(str(data["next_battle_reward_relic_id"]))
-	if reward_relic_id != &"" and not RuleEngine.RELIC_DEFINITIONS.has(reward_relic_id):
+	if reward_relic_id != &"" and not RelicCatalog.has_relic(reward_relic_id):
 		return "下一战奖励包含未知遗物：%s" % reward_relic_id
 
 	var parsed_evidence: Array[Dictionary] = []
@@ -640,7 +645,7 @@ func enter_node(node_id: StringName) -> bool:
 	if node.node_type == MapNode.NodeType.EVENT:
 		begin_event()
 	elif node.node_type == MapNode.NodeType.SHOP:
-		pending_shop_stock = ShopCatalog.generate(node.content_seed, shop_remove_count)
+		pending_shop_stock = ShopCatalog.generate(node.content_seed, shop_remove_count, relics)
 	return true
 
 
@@ -655,6 +660,13 @@ func complete_current_node() -> bool:
 	var node: MapNode = map_graph.get_node(current_node_id)
 	if node == null or node.completed:
 		last_action_error = "节点已经完成"
+		return false
+	if (
+		node.node_type == MapNode.NodeType.ELITE
+		and bool(pending_node_resolution.get(&"battle_won", false))
+		and not bool(pending_node_resolution.get(&"elite_reward_claimed", false))
+	):
+		last_action_error = "精英遗物必须在选择或跳过卡牌后结算"
 		return false
 	node.completed = true
 	node.reachable = false
@@ -732,6 +744,8 @@ func record_current_battle_victory() -> bool:
 		return false
 	ink_crystals += ELITE_BATTLE_INCOME if node.node_type == MapNode.NodeType.ELITE else NORMAL_BATTLE_INCOME
 	_settle_next_battle_relic_reward()
+	if node.node_type == MapNode.NodeType.ELITE:
+		_prepare_elite_relic_reward(node.content_seed)
 	pending_node_resolution[&"reward_settled"] = true
 	pending_node_resolution[&"battle_won"] = true
 	if not completed_battles.has(node.depth):
@@ -766,7 +780,17 @@ func generate_reward_choices(stage: int) -> Array[StringName]:
 	var base_seed: int = node.content_seed if node != null else seed_value + stage * 1009
 	reward_rng.seed = base_seed + reward_round * 7919
 	var pool: Array[StringName] = _reward_pool_for_stage(stage)
-	for draw_index: int in range(3):
+	var elite_reward: bool = node != null and node.node_type == MapNode.NodeType.ELITE
+	if elite_reward:
+		var rare_pool: Array[StringName] = []
+		for card_id: StringName in pool:
+			if str(CardCatalog.get_definition(card_id).get(&"rarity", "")) == "罕见":
+				rare_pool.append(card_id)
+		if not rare_pool.is_empty():
+			var rare_id: StringName = rare_pool[reward_rng.randi_range(0, rare_pool.size() - 1)]
+			pending_reward_ids.append(rare_id)
+			pool.erase(rare_id)
+	while pending_reward_ids.size() < 3 and not pool.is_empty():
 		var pool_index: int = reward_rng.randi_range(0, pool.size() - 1)
 		pending_reward_ids.append(pool[pool_index])
 		pool.remove_at(pool_index)
@@ -790,6 +814,7 @@ func choose_reward(choice_index: int) -> bool:
 		return false
 	_add_deck_card(pending_reward_ids[choice_index], true)
 	pending_reward_ids.clear()
+	_settle_pending_elite_reward()
 	if not pending_node_resolution.is_empty():
 		pending_node_resolution[&"resolved"] = true
 	return true
@@ -799,9 +824,42 @@ func skip_reward() -> bool:
 	if pending_reward_ids.is_empty():
 		return false
 	pending_reward_ids.clear()
+	_settle_pending_elite_reward()
 	if not pending_node_resolution.is_empty():
 		pending_node_resolution[&"resolved"] = true
 	return true
+
+
+func get_pending_elite_reward() -> Dictionary:
+	if pending_node_resolution.is_empty():
+		return {}
+	var relic_id: StringName = pending_node_resolution.get(&"pending_elite_relic_id", &"") as StringName
+	var fallback_ink: int = int(pending_node_resolution.get(&"pending_elite_fallback_ink", 0))
+	if relic_id != &"":
+		return {&"kind": &"relic", &"relic_id": relic_id, &"definition": RelicCatalog.get_definition(relic_id)}
+	if fallback_ink > 0:
+		return {&"kind": &"ink", &"amount": fallback_ink}
+	return {}
+
+
+func can_view_shop_archive() -> bool:
+	var node: MapNode = get_current_map_node()
+	return (
+		node != null
+		and node.node_type == MapNode.NodeType.SHOP
+		and relics.has(&"seventh_dock_stamp")
+		and not pending_shop_stock.is_empty()
+	)
+
+
+func get_shop_archive_record() -> Dictionary:
+	if not can_view_shop_archive():
+		return {}
+	return {
+		&"title": "第七码头旧档案",
+		&"source": "第七码头通行章 / 商店隐藏抽屉",
+		&"description": "档案显示，终末机构的回收者登记、残骸编号与返航注销流程，逐栏复制自数百年前的旧码头。‘自愿’一词使用另一种墨水统一补录。",
+	}
 
 
 func buy_shop_card(stock_index: int) -> bool:
@@ -1238,6 +1296,34 @@ func _deterministic_rare_card(seed_offset: int) -> StringName:
 	var rare_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rare_rng.seed = seed_value + seed_offset
 	return RARE_REWARD_IDS[rare_rng.randi_range(0, RARE_REWARD_IDS.size() - 1)]
+
+
+func _prepare_elite_relic_reward(content_seed: int) -> void:
+	if pending_node_resolution.has(&"pending_elite_relic_id") or pending_node_resolution.has(&"pending_elite_fallback_ink"):
+		return
+	var pool: Array[StringName] = RelicCatalog.get_elite_drop_ids(relics)
+	if pool.is_empty():
+		pending_node_resolution[&"pending_elite_fallback_ink"] = ELITE_RELIC_FALLBACK_INCOME
+		return
+	var reward_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	reward_rng.seed = content_seed + 17041
+	pending_node_resolution[&"pending_elite_relic_id"] = pool[reward_rng.randi_range(0, pool.size() - 1)]
+
+
+func _settle_pending_elite_reward() -> void:
+	if pending_node_resolution.is_empty() or bool(pending_node_resolution.get(&"elite_reward_claimed", false)):
+		return
+	var relic_id: StringName = pending_node_resolution.get(&"pending_elite_relic_id", &"") as StringName
+	var fallback_ink: int = int(pending_node_resolution.get(&"pending_elite_fallback_ink", 0))
+	if relic_id != &"" and not relics.has(relic_id):
+		relics.append(relic_id)
+	elif fallback_ink > 0:
+		ink_crystals += fallback_ink
+	else:
+		return
+	pending_node_resolution[&"elite_reward_claimed"] = true
+	pending_node_resolution.erase(&"pending_elite_relic_id")
+	pending_node_resolution.erase(&"pending_elite_fallback_ink")
 
 
 func _settle_next_battle_relic_reward() -> void:

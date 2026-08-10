@@ -44,19 +44,37 @@ func _run() -> void:
 	main.run_model.selected_event_id = &"calibration_station"
 	main.run_model.event_resolved = false
 	main.run_model.apply_event_choice(1)
+	main.run_model.relics = RelicCatalog.get_all_ids()
 	main._show_archive_screen(&"evidence")
 	await process_frame
 	_check_current_page("archive", true, true)
 	_expect(_find_named(main.screen_root, "ArchiveContent") != null, "archive combines run state, relics and evidence")
 	_expect(_tree_contains_text(main.screen_root, "来源：随机事件：校准站"), "archive shows evidence source in the responsive scroll page")
 	_expect(_tree_contains_text(main.screen_root, "可替换资产"), "archive shows evidence description in the responsive scroll page")
+	for relic_id: StringName in RelicCatalog.get_all_ids():
+		var definition: Dictionary = RelicCatalog.get_definition(relic_id)
+		_expect(_find_named(main.screen_root, "Relic_%s" % relic_id) != null, "archive lays out relic panel %s" % relic_id)
+		_expect(_tree_contains_text(main.screen_root, "完整效果：%s" % definition[&"description"]), "archive lays out full effect for %s" % relic_id)
+		_expect(_tree_contains_text(main.screen_root, "风味：%s" % definition[&"flavor"]), "archive lays out flavor for %s" % relic_id)
+	_expect(_scroll_has_overflow("ArchiveContent"), "complete eight-relic archive scrolls instead of clipping")
+	_expect(_tree_contains_text(main.screen_root, "可能仍被后续裂解杀死"), "return bell warning remains visible in archive layout")
 
-	main.run_model.pending_shop_stock = ShopCatalog.generate(73103, main.run_model.shop_remove_count)
+	main.run_model.current_node_id = &"d04_01"
+	main.run_model.pending_shop_stock = ShopCatalog.generate(73103, main.run_model.shop_remove_count, main.run_model.relics)
 	main._show_shop_screen()
 	await process_frame
 	_check_current_page("shop", true, true)
 	_expect(_scroll_has_overflow("ShopContent"), "shop removal list scrolls for a long deck")
 	_expect(_find_button_with_text(main.screen_root, "离开商店") != null, "shop leave action remains visible")
+	_expect(_find_button_with_text(main.screen_root, "查看旧档案") != null, "shop layout keeps the old archive action visible")
+	var shop_digest: String = ShopCatalog.digest(main.run_model.pending_shop_stock)
+	main._show_shop_archive()
+	await process_frame
+	_check_current_page("shop archive", true, true)
+	_expect(_find_named(main.screen_root, "ShopArchiveContent") != null, "shop old archive uses scrollable content")
+	_expect(_tree_contains_text(main.screen_root, "‘自愿’一词使用另一种墨水统一补录"), "shop old archive body is visible")
+	_expect(_find_button_with_text(main.screen_root, "返回商店（库存未变化）") != null, "shop archive return action states stock safety")
+	_expect(ShopCatalog.digest(main.run_model.pending_shop_stock) == shop_digest, "shop archive layout does not mutate stock")
 
 	main._show_upgrade_screen(&"forge")
 	await process_frame
@@ -70,12 +88,21 @@ func _run() -> void:
 	await process_frame
 	_check_current_page("rest", true, true)
 
-	var reward_ids: Array[StringName] = [&"broken_sentence", &"blank_space", &"rift_slash"]
+	var reward_ids: Array[StringName] = [&"critical_permission", &"blank_space", &"rift_slash"]
 	main.run_model.pending_reward_ids = reward_ids
+	main.run_model.pending_node_resolution = {
+		&"pending_elite_relic_id": &"blank_epitaph",
+		&"battle_won": true,
+		&"reward_settled": true,
+		&"resolved": false,
+	}
 	main._show_reward_screen()
 	await process_frame
 	_check_current_page("reward", true, true)
 	_expect(_find_button_with_text(main.screen_root, "跳过奖励") != null, "reward skip remains visible")
+	_expect(_find_named(main.screen_root, "EliteRelicReward") != null, "elite relic reward panel fits the reward scroll page")
+	_expect(_tree_contains_text(main.screen_root, "选择或跳过卡牌后领取"), "elite reward panel keeps delayed settlement text visible")
+	_expect(_tree_contains_text(main.screen_root, "精英卡池保证至少 1 张罕见"), "elite reward header keeps rare-card guarantee visible")
 
 	main.run_model.selected_event_id = &"authorless_book"
 	main.run_model.event_resolved = false
@@ -120,9 +147,21 @@ func _run() -> void:
 
 	main._start_test_level()
 	await process_frame
+	var all_relics: Array[StringName] = RelicCatalog.get_all_ids()
+	var relic_bonus_cards: Array[StringName] = []
+	main.model.start_battle(73109, CombatModel.TUTORIAL_STAGE_MAX, relic_bonus_cards, &"pressure_archivist", all_relics)
+	main._refresh_combat()
+	await process_frame
 	_expect(main.page != null, "combat page exists")
 	_expect(main.screen_root.size.x <= 1280.0, "combat does not widen root beyond logical viewport")
 	_expect(main.page.get_combined_minimum_size().x <= 1240.0, "combat layout minimum width fits viewport")
+	var relic_hud: RichTextLabel = _find_named(main.screen_root, "RelicHUD") as RichTextLabel
+	_expect(relic_hud != null, "combat layout includes RelicHUD")
+	if relic_hud != null:
+		_expect(relic_hud.text.contains("本场触发 0"), "RelicHUD exposes live trigger counts")
+		for relic_id: StringName in all_relics:
+			_expect(relic_hud.text.contains(str(RelicCatalog.get_definition(relic_id)[&"title"])), "RelicHUD lays out %s" % relic_id)
+		_expect(relic_hud.text.contains("可能仍被后续裂解杀死"), "RelicHUD keeps explicit return bell warning")
 
 	var corrupt_file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
 	corrupt_file.store_string("{broken save")

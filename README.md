@@ -2,7 +2,7 @@
 
 单人肉鸽牌组构筑游戏原型。Godot 4.7.x + typed GDScript，简体中文优先。
 
-当前处于 **v0.9 Demo硬化（M3进行中）**：v1战斗外存档/继续里程碑已完成，剩余遗物接线、真人试玩与导出。数值、机制与文本优先，美术与动画留到最后。
+当前处于 **v0.9 Demo硬化（M3进行中）**：v1战斗外存档/继续与8件遗物接线里程碑已完成，剩余真人试玩、中文/操作审校与导出。数值、机制与文本优先，美术与动画留到最后。
 
 ## 快速开始
 
@@ -24,10 +24,12 @@ PROJECT=.
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_flow.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_boss.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_events.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_relics.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_chinese_font.gd
 
 # 确定性模拟（战斗平衡、远征经济、Boss与完整章节）
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_balance.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/sim_relics.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_chapter.gd
 
 # 主场景冒烟
@@ -61,7 +63,8 @@ docs/             协作与数值调整指引
 | `save_manager.gd` | `user://` 存档读写、检查、摘要与删除 |
 | `card_catalog.gd` | 卡牌数据（19种） |
 | `enemy_catalog.gd` | 敌人数据（9 种） |
-| `rule_engine.gd` | 数值修正管线与遗物 |
+| `relic_catalog.gd` | 8件遗物的名称、稀有度、效果、风味与来源 |
+| `rule_engine.gd` | 数值修正管线、遗物触发状态与遥测 |
 | `target_selector.gd` | 统一目标解析 |
 | `pending_selection.gd` | 待玩家指定目标的请求 |
 
@@ -86,7 +89,8 @@ v1存档默认写入 `user://broken_ring_run_v1.json`。只保存战斗外节点
 - 6 个文字事件、结构化证据档案与旧线索结算回收
 - 种子固定的商店库存与价格、卡牌购买、实例移除、固定路线升级
 - v1战斗外检查点：标题页继续、摘要、主动删除、损坏/版本不兼容安全降级；Boss结算自动删档
-- 2 件已接线遗物，6 件留数据位
+- 8 件遗物全部接线；地图档案可查看稀有度、完整效果、来源与风味，战斗HUD显示本场触发次数
+- 精英胜利固定获得30墨晶、1件未持有遗物及至少含1张罕见的三选一卡牌；遗物池取尽后改为50墨晶
 
 ## 引导原则
 

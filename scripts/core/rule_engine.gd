@@ -39,53 +39,8 @@ const PHASE_ORDER: Array[Phase] = [
 const WEAK_MULTIPLIER: float = 0.75
 const VULNERABLE_MULTIPLIER: float = 1.5
 
-## 已接入规则管线的遗物；其余设计文档中的遗物留出数据位但尚未接线。
-const RELIC_DEFINITIONS: Dictionary = {
-	&"crack_stabilizer": {
-		&"title": "裂纹稳定器",
-		&"rarity": "起始遗物",
-		&"channel": Channel.FRACTURE,
-		&"description": "每场战斗第一次获得不稳定时，少获得 1 点。",
-		&"implemented": true,
-	},
-	&"wordless_bookplate": {
-		&"title": "无字藏书票",
-		&"rarity": "普通 / 纪元",
-		&"channel": Channel.DRAW,
-		&"description": "每场战斗第一次打出律式后，抽 1 张牌。",
-		&"implemented": true,
-	},
-	&"calibrator_red_pen": {
-		&"title": "校准官的红笔", &"rarity": "普通", &"channel": Channel.DAMAGE_TO_ENEMY,
-		&"description": "每场战斗第一次升级效果触发时，额外造成或获得 3 点对应数值。",
-		&"implemented": false,
-	},
-	&"delay_gear": {
-		&"title": "延迟齿轮", &"rarity": "普通", &"channel": Channel.COST,
-		&"description": "每场战斗第一张封存牌倒计时减少 1，最低为 0。",
-		&"implemented": false,
-	},
-	&"echo_hyoid": {
-		&"title": "复读舌骨", &"rarity": "罕见", &"channel": Channel.BLOCK,
-		&"description": "每回合第一次触发回响时，额外获得 3 格挡。",
-		&"implemented": false,
-	},
-	&"seventh_dock_stamp": {
-		&"title": "第七码头通行章", &"rarity": "罕见 / 纪元", &"channel": Channel.COST,
-		&"description": "商店移除卡牌费用降低 25；进入商店时额外出现“查看旧档案”。",
-		&"implemented": false,
-	},
-	&"blank_epitaph": {
-		&"title": "空白墓志铭", &"rarity": "稀有 / 纪元", &"channel": Channel.BLOCK,
-		&"description": "每场战斗第一次生命降至 50% 以下时，获得 12 格挡并将 1 张随机手牌封存 1。",
-		&"implemented": false,
-	},
-	&"expired_return_bell": {
-		&"title": "过期返航铃", &"rarity": "Boss级", &"channel": Channel.FRACTURE,
-		&"description": "受到致命伤害时保留 1 点生命，随后裂解；每场战斗限 1 次。",
-		&"implemented": false,
-	},
-}
+## 兼容旧调用点的只读代理；遗物定义的唯一真相源是 RelicCatalog。
+static var RELIC_DEFINITIONS: Dictionary = RelicCatalog.DEFINITIONS
 
 var player_strength: int = 0
 var player_weak_turns: int = 0
@@ -97,6 +52,11 @@ var enemy_next_attack_bonus: int = 0
 var relics: Array[StringName] = []
 var crack_stabilizer_used: bool = false
 var bookplate_used: bool = false
+var calibrator_red_pen_used: bool = false
+var delay_gear_used: bool = false
+var echo_hyoid_used_this_turn: bool = false
+var blank_epitaph_used: bool = false
+var expired_return_bell_used: bool = false
 
 var _relic_trigger_counts: Dictionary = {}
 var _relic_net_benefits: Dictionary = {}
@@ -115,6 +75,11 @@ func reset_for_battle(p_relics: Array[StringName]) -> void:
 	enemy_next_attack_bonus = 0
 	crack_stabilizer_used = false
 	bookplate_used = false
+	calibrator_red_pen_used = false
+	delay_gear_used = false
+	echo_hyoid_used_this_turn = false
+	blank_epitaph_used = false
+	expired_return_bell_used = false
 	_relic_trigger_counts.clear()
 	_relic_net_benefits.clear()
 	last_trace.clear()
@@ -125,19 +90,22 @@ func has_relic(relic_id: StringName) -> bool:
 
 
 static func relic_title(relic_id: StringName) -> String:
-	var definition: Dictionary = RELIC_DEFINITIONS.get(relic_id, {})
+	var definition: Dictionary = RelicCatalog.get_definition(relic_id)
 	return str(definition.get(&"title", "未知遗物"))
 
 
 static func is_relic_implemented(relic_id: StringName) -> bool:
-	var definition: Dictionary = RELIC_DEFINITIONS.get(relic_id, {})
+	var definition: Dictionary = RelicCatalog.get_definition(relic_id)
 	return bool(definition.get(&"implemented", false))
 
 
 ## 玩家对敌人造成的伤害。is_attack 为 false 时跳过力量/虚弱等攻击状态修正。
-func compute_damage_to_enemy(base: int, is_attack: bool) -> int:
+func compute_damage_to_enemy(
+	base: int, is_attack: bool, upgrade_baseline: int = -1, is_upgraded: bool = false
+) -> int:
 	last_trace.clear()
 	var value: float = float(base)
+	var baseline_value: float = float(upgrade_baseline)
 	_trace(Phase.BASE, "基础伤害 %d" % base)
 	#攻击方阶段内部固定为“先加法后乘法”，因此力量永远在虚弱之前结算。
 	if not is_attack:
@@ -145,18 +113,30 @@ func compute_damage_to_enemy(base: int, is_attack: bool) -> int:
 	else:
 		if player_strength != 0:
 			value += float(player_strength)
+			if upgrade_baseline >= 0:
+				baseline_value += float(player_strength)
 			_trace(Phase.ATTACKER, "力量 %+d → %d" % [player_strength, int(value)])
 		if player_weak_turns > 0:
 			value = floor(value * WEAK_MULTIPLIER)
+			if upgrade_baseline >= 0:
+				baseline_value = floor(baseline_value * WEAK_MULTIPLIER)
 			_trace(Phase.ATTACKER, "虚弱 ×0.75 → %d" % int(value))
 		if player_strength == 0 and player_weak_turns <= 0:
 			_trace(Phase.ATTACKER, "无攻击方状态修正")
 	if enemy_vulnerable_turns > 0:
 		value = floor(value * VULNERABLE_MULTIPLIER)
+		if upgrade_baseline >= 0:
+			baseline_value = floor(baseline_value * VULNERABLE_MULTIPLIER)
 		_trace(Phase.DEFENDER, "敌方脆弱 ×1.5 → %d" % int(value))
 	else:
 		_trace(Phase.DEFENDER, "目标无受击修正")
-	_trace(Phase.RELIC, "无伤害类遗物修正")
+	if _can_trigger_red_pen(is_upgraded, int(value), int(baseline_value), upgrade_baseline):
+		calibrator_red_pen_used = true
+		value += 3.0
+		_record_relic_benefit(&"calibrator_red_pen", 3)
+		_trace(Phase.RELIC, "校准官的红笔 +3 → %d" % int(value))
+	else:
+		_trace(Phase.RELIC, "无伤害类遗物修正")
 	var result: int = maxi(0, int(value))
 	_trace(Phase.CLAMP, "裁剪至不小于 0 → %d" % result)
 	return result
@@ -186,13 +166,20 @@ func compute_damage_to_player(base: int, is_attack: bool) -> int:
 	return result
 
 
-func compute_block(base: int) -> int:
+func compute_block(base: int, upgrade_baseline: int = -1, is_upgraded: bool = false) -> int:
 	last_trace.clear()
 	_trace(Phase.BASE, "基础格挡 %d" % base)
 	_trace(Phase.ATTACKER, "无施加方格挡状态")
 	_trace(Phase.DEFENDER, "无受击方格挡状态")
-	_trace(Phase.RELIC, "无格挡类遗物修正")
-	var result: int = maxi(0, base)
+	var value: int = base
+	if _can_trigger_red_pen(is_upgraded, value, upgrade_baseline, upgrade_baseline):
+		calibrator_red_pen_used = true
+		value += 3
+		_record_relic_benefit(&"calibrator_red_pen", 3)
+		_trace(Phase.RELIC, "校准官的红笔 +3 → %d" % value)
+	else:
+		_trace(Phase.RELIC, "无格挡类遗物修正")
+	var result: int = maxi(0, value)
 	_trace(Phase.CLAMP, "裁剪至不小于 0 → %d" % result)
 	return result
 
@@ -267,7 +254,59 @@ func consume_bookplate_draw(card_type: int) -> int:
 	return 1
 
 
-## 返回规则层只读遥测快照。收益单位按遗物定义：稳定器为少获得的不稳定，藏书票为额外抽牌。
+func adjust_first_seal_countdown(base_turns: int) -> int:
+	if delay_gear_used or not has_relic(&"delay_gear"):
+		return maxi(0, base_turns)
+	delay_gear_used = true
+	var adjusted: int = maxi(0, base_turns - 1)
+	_record_relic_benefit(&"delay_gear", base_turns - adjusted)
+	return adjusted
+
+
+func begin_player_turn() -> void:
+	echo_hyoid_used_this_turn = false
+
+
+func consume_echo_hyoid_block() -> int:
+	if echo_hyoid_used_this_turn or not has_relic(&"echo_hyoid"):
+		return 0
+	echo_hyoid_used_this_turn = true
+	_record_relic_benefit(&"echo_hyoid", 3)
+	return 3
+
+
+func consume_blank_epitaph(previous_hp: int, current_hp: int, max_hp: int) -> bool:
+	if blank_epitaph_used or not has_relic(&"blank_epitaph"):
+		return false
+	if previous_hp * 2 < max_hp or current_hp * 2 >= max_hp:
+		return false
+	blank_epitaph_used = true
+	_record_relic_benefit(&"blank_epitaph", 12)
+	return true
+
+
+func consume_expired_return_bell(lethal: bool) -> bool:
+	if not lethal or expired_return_bell_used or not has_relic(&"expired_return_bell"):
+		return false
+	expired_return_bell_used = true
+	_record_relic_benefit(&"expired_return_bell", 1)
+	return true
+
+
+func _can_trigger_red_pen(
+	is_upgraded: bool, current_value: int, baseline_value: int, baseline_argument: int
+) -> bool:
+	return (
+		has_relic(&"calibrator_red_pen")
+		and not calibrator_red_pen_used
+		and is_upgraded
+		and baseline_argument >= 0
+		and current_value > 0
+		and current_value > baseline_value
+	)
+
+
+## 返回规则层只读遥测快照。不同遗物的收益单位依其规则文本定义，不直接横向比较。
 func get_relic_telemetry() -> Dictionary:
 	return {
 		&"trigger_counts": _relic_trigger_counts.duplicate(),

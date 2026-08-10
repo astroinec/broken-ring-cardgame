@@ -64,6 +64,12 @@ jobs:
       - name: Run Chinese font tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_chinese_font.gd'
 
+      - name: Run eight-relic rule tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_relics.gd'
+
+      - name: Run deterministic relic pressure simulation
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_relics.gd'
+
       - name: Run deterministic balance simulation
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_balance.gd'
 

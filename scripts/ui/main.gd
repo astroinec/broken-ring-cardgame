@@ -376,7 +376,7 @@ func _show_archive_screen(section: StringName = &"relics") -> void:
 	state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(state)
-	_add_archive_section(content, "遗物", _relic_entry_names(), section == &"relics")
+	_add_relic_archive_section(content, section == &"relics")
 	_add_evidence_archive_section(content, section == &"evidence")
 	var history_entries: Array = ["事件历史提示已隐藏；证据档案不受影响。"] if run_model.event_history_hints_hidden else run_model.event_history
 	_add_archive_section(content, "事件历史", history_entries, false)
@@ -409,6 +409,36 @@ func _add_archive_section(parent: VBoxContainer, heading_text: String, entries: 
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		parent.add_child(label)
+
+
+func _add_relic_archive_section(parent: VBoxContainer, emphasized: bool) -> void:
+	var heading: Label = Label.new()
+	heading.text = "遗物档案"
+	heading.add_theme_font_size_override("font_size", 24 if emphasized else 21)
+	heading.add_theme_color_override("font_color", Color("ffd27d") if emphasized else Color("e7d9b5"))
+	parent.add_child(heading)
+	if run_model.relics.is_empty():
+		var empty: Label = Label.new()
+		empty.text = "尚无记录"
+		empty.add_theme_color_override("font_color", Color("8295a8"))
+		parent.add_child(empty)
+		return
+	for relic_id: StringName in run_model.relics:
+		var definition: Dictionary = RelicCatalog.get_definition(relic_id)
+		var panel: PanelContainer = PanelContainer.new()
+		panel.name = "Relic_%s" % relic_id
+		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_theme_stylebox_override("panel", _panel_style(Color("201d2c"), Color("806da3"), 8))
+		parent.add_child(panel)
+		var label: Label = Label.new()
+		label.text = "%s｜%s\n完整效果：%s\n风味：%s\n状态：%s｜来源：%s" % [
+			definition[&"title"], definition[&"rarity"], definition[&"description"],
+			definition[&"flavor"], "已实现" if bool(definition[&"implemented"]) else "未实现",
+			definition[&"source_hint"],
+		]
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_child(label)
 
 
 func _add_evidence_archive_section(parent: VBoxContainer, emphasized: bool) -> void:
@@ -484,16 +514,34 @@ func _show_shop_screen() -> void:
 		content.add_child(button)
 	var relic: Dictionary = run_model.pending_shop_stock.get(&"relic", {})
 	var relic_reason: String = shop.relic_unavailable_reason(run_model)
-	var relic_button: Button = _configure_button(Button.new(), 54)
-	relic_button.text = "%s｜%d 墨晶%s" % [RuleEngine.relic_title(relic[&"relic_id"] as StringName), relic[&"price"], "｜不可用：%s" % relic_reason if not relic_reason.is_empty() else ""]
+	var relic_button: Button = _configure_button(Button.new(), 78)
+	if relic.is_empty():
+		relic_button.text = "遗物栏｜%s" % relic_reason
+	else:
+		var relic_definition: Dictionary = RelicCatalog.get_definition(relic[&"relic_id"] as StringName)
+		relic_button.text = "%s｜%s｜%d 墨晶\n%s%s" % [
+			relic_definition[&"title"], relic_definition[&"rarity"], relic[&"price"],
+			relic_definition[&"description"], "｜不可用：%s" % relic_reason if not relic_reason.is_empty() else "",
+		]
 	relic_button.disabled = not relic_reason.is_empty()
 	relic_button.tooltip_text = relic_reason
 	relic_button.pressed.connect(_on_shop_relic_pressed)
 	content.add_child(relic_button)
+	if run_model.can_view_shop_archive():
+		var archive_button: Button = _configure_button(Button.new(), 52)
+		archive_button.name = "ShopArchive"
+		archive_button.text = "查看旧档案（不消耗库存）"
+		archive_button.pressed.connect(_show_shop_archive)
+		content.add_child(archive_button)
 	var service: Dictionary = run_model.pending_shop_stock.get(&"remove_service", {})
 	var remove_reason: String = shop.remove_unavailable_reason(run_model)
+	var remove_price: int = shop.get_remove_price(run_model)
 	var remove_label: Label = Label.new()
-	remove_label.text = "移除服务｜%d 墨晶%s\n选择一个具体实例；长牌组可在此区域继续向下滚动。" % [service[&"price"], "｜不可用：%s" % remove_reason if not remove_reason.is_empty() else ""]
+	remove_label.text = "移除服务｜%d 墨晶%s%s\n选择一个具体实例；长牌组可在此区域继续向下滚动。" % [
+		remove_price,
+		"（通行章已减免 25）" if run_model.relics.has(&"seventh_dock_stamp") else "",
+		"｜不可用：%s" % remove_reason if not remove_reason.is_empty() else "",
+	]
 	remove_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	remove_label.add_theme_font_size_override("font_size", 23)
 	remove_label.add_theme_color_override("font_color", Color("e7d9b5"))
@@ -510,6 +558,27 @@ func _show_shop_screen() -> void:
 	leave.text = "离开商店并返回地图"
 	leave.pressed.connect(_on_shop_leave_pressed)
 	footer.add_child(leave)
+
+
+func _show_shop_archive() -> void:
+	var record: Dictionary = run_model.get_shop_archive_record()
+	if record.is_empty():
+		return
+	ui_mode = &"shop_archive"
+	_clear_screen()
+	var archive_page: VBoxContainer = _create_page(str(record[&"title"]), str(record[&"source"]))
+	var content: VBoxContainer = _add_page_scroll(archive_page, "ShopArchiveContent")
+	var body: Label = Label.new()
+	body.text = str(record[&"description"])
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_theme_font_size_override("font_size", 22)
+	body.add_theme_color_override("font_color", Color("d8e0e7"))
+	content.add_child(body)
+	var footer: HBoxContainer = _add_page_footer(archive_page)
+	var back: Button = _configure_button(Button.new())
+	back.text = "返回商店（库存未变化）"
+	back.pressed.connect(_show_shop_screen)
+	footer.add_child(back)
 
 
 func _on_shop_card_pressed(index: int) -> void:
@@ -832,6 +901,16 @@ func _build_combat_screen() -> void:
 	hint_label.add_theme_font_size_override("font_size", 16)
 	hint_label.add_theme_color_override("font_color", Color("a9bdd0"))
 	page.add_child(hint_label)
+	var relic_hud: RichTextLabel = RichTextLabel.new()
+	relic_hud.name = "RelicHUD"
+	relic_hud.text = model.get_relic_hud_text()
+	relic_hud.custom_minimum_size = Vector2(0, 42)
+	relic_hud.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	relic_hud.scroll_active = true
+	relic_hud.add_theme_font_size_override("normal_font_size", 14)
+	relic_hud.add_theme_color_override("default_color", Color("c5a4df"))
+	relic_hud.tooltip_text = "持有遗物的短效果与本场触发次数；可滚动查看。"
+	page.add_child(relic_hud)
 
 	var stats_panel: PanelContainer = PanelContainer.new()
 	stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("182332"), Color("40566e"), 8))
@@ -1077,13 +1156,34 @@ func _on_battle_result_pressed() -> void:
 func _show_reward_screen() -> void:
 	ui_mode = &"reward"
 	_clear_screen()
+	var elite_reward: Dictionary = run_model.get_pending_elite_reward()
+	var elite_note: String = ""
+	if not elite_reward.is_empty():
+		elite_note = "｜精英卡池保证至少 1 张罕见"
 	var reward_page: VBoxContainer = _create_page(
-		"战后回收",
-		"选择一张残页加入牌组，也可以跳过。生命 %d/%d｜墨晶 %d｜牌组 %d 张" % [
-			run_model.player_hp, run_model.player_max_hp, run_model.ink_crystals, run_model.deck_instances.size(),
+		"精英战果" if not elite_reward.is_empty() else "战后回收",
+		"选择一张残页加入牌组，也可以跳过。生命 %d/%d｜墨晶 %d｜牌组 %d 张%s" % [
+			run_model.player_hp, run_model.player_max_hp, run_model.ink_crystals, run_model.deck_instances.size(), elite_note,
 		]
 	)
 	var cards: VBoxContainer = _add_page_scroll(reward_page, "RewardList")
+	if not elite_reward.is_empty():
+		var elite_panel: PanelContainer = PanelContainer.new()
+		elite_panel.name = "EliteRelicReward"
+		elite_panel.add_theme_stylebox_override("panel", _panel_style(Color("30251b"), Color("d4a755"), 10))
+		cards.add_child(elite_panel)
+		var elite_label: Label = Label.new()
+		if elite_reward[&"kind"] == &"relic":
+			var definition: Dictionary = elite_reward[&"definition"]
+			elite_label.text = "精英固定奖励｜%s｜%s\n%s\n选择或跳过卡牌后领取。" % [
+				definition[&"title"], definition[&"rarity"], definition[&"description"],
+			]
+		else:
+			elite_label.text = "精英固定奖励｜可掉落遗物已全部持有\n替代奖励：%d 墨晶。选择或跳过卡牌后领取。" % elite_reward[&"amount"]
+		elite_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		elite_label.add_theme_font_size_override("font_size", 21)
+		elite_label.add_theme_color_override("font_color", Color("ffd27d"))
+		elite_panel.add_child(elite_label)
 	for index: int in range(run_model.pending_reward_ids.size()):
 		var card_id: StringName = run_model.pending_reward_ids[index]
 		var definition: Dictionary = CardCatalog.get_definition(card_id)

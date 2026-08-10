@@ -94,6 +94,7 @@ var missing_name: Dictionary = {}
 
 var _telemetry_fractures: int = 0
 var _telemetry_card_uses: Dictionary = {}
+var _logged_red_pen_triggers: int = 0
 
 var last_card_type: int = -1
 var last_card_id: StringName = &""
@@ -187,6 +188,7 @@ func start_battle(
 	log_entries.clear()
 	_telemetry_fractures = 0
 	_telemetry_card_uses.clear()
+	_logged_red_pen_triggers = 0
 	rule_engine.reset_for_battle(p_relics)
 	rule_engine.enemy_strength = maxi(0, int(p_battle_context.get(&"enemy_strength", 0)))
 	var initial_law_missing_name: int = maxi(0, int(p_battle_context.get(&"initial_missing_name_law", 0)))
@@ -421,14 +423,20 @@ func _run_effect_loop() -> bool:
 
 func _apply_automatic_effect(effect: CardEffect) -> void:
 	var card: CardData = _play_card
+	var base_effect: CardEffect = _base_effect_for_current_index(card)
 	match effect.kind:
 		CardEffect.Kind.DAMAGE_ENEMY:
 			var target: int = TargetSelector.resolve_enemy(effect.target_kind, build_target_context())
+			var baseline_damage: int = effect.amount if base_effect == null else base_effect.amount
 			_play_resolved_damage += _deal_damage_to_enemy(
-				effect.amount, get_card_effective_type(card), card.title, target
+				effect.amount, get_card_effective_type(card), card.title, target,
+				baseline_damage, card.upgrade_id != &""
 			)
 		CardEffect.Kind.GAIN_BLOCK:
-			_play_resolved_block += _gain_player_block(effect.amount, card.title)
+			var baseline_block: int = effect.amount if base_effect == null else base_effect.amount
+			_play_resolved_block += _gain_player_block(
+				effect.amount, card.title, true, baseline_block, card.upgrade_id != &""
+			)
 		CardEffect.Kind.DRAW_CARDS:
 			draw_cards(effect.amount, false)
 		CardEffect.Kind.GAIN_INSTABILITY:
@@ -436,34 +444,45 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 		CardEffect.Kind.REDUCE_INSTABILITY:
 			var reduced: int = mini(instability, effect.amount)
 			instability -= reduced
-			var converted_block: int = rule_engine.compute_block(reduced * effect.factor)
+			var baseline_factor: int = effect.factor if base_effect == null else base_effect.factor
+			var converted_block: int = rule_engine.compute_block(
+				reduced * effect.factor, reduced * baseline_factor, card.upgrade_id != &""
+			)
 			player_block += converted_block
 			_play_resolved_block += converted_block
 			_log("不稳定减少 %d；转化为 %d 格挡。" % [reduced, converted_block])
+			_log_red_pen_if_just_triggered()
 		CardEffect.Kind.SEAL_CARD:
-			card.sealed_turns = effect.amount
-			sealed_zone.append(card)
+			_seal_card(card, effect.amount, card.title)
 			_play_card_was_sealed = true
-			_log("《%s》封存 %d 回合。" % [card.title, effect.amount])
 		CardEffect.Kind.ECHO_ATTACK:
 			if last_card_type == CardData.CardType.ATTACK:
 				var echoed_damage: int = floori(float(last_damage_snapshot) * float(effect.amount) / 100.0)
+				var baseline_percent: int = effect.amount if base_effect == null else base_effect.amount
+				var baseline_echo_damage: int = floori(float(last_damage_snapshot) * float(baseline_percent) / 100.0)
 				_log("回响上一张攻式已结算伤害的 %d%%：%d。" % [effect.amount, echoed_damage])
 				# 回响沿用原目标；原目标已死亡时改为指向生命最低的敌人。
 				var echo_target: int = TargetSelector.resolve_enemy(
 					TargetSelector.Kind.LOWEST_HP_ENEMY, build_target_context()
 				)
 				_play_resolved_damage += _deal_damage_to_enemy(
-					echoed_damage, get_card_effective_type(card), card.title, echo_target
+					echoed_damage, get_card_effective_type(card), card.title, echo_target,
+					baseline_echo_damage, card.upgrade_id != &""
 				)
+				_apply_echo_hyoid()
 				_on_boss_echo_resolved()
 			else:
 				_log("回响失败：紧邻上一张牌不是攻式。")
 		CardEffect.Kind.ECHO_BLOCK:
 			if last_card_type == CardData.CardType.DEFENSE:
 				var echoed_block: int = floori(float(last_block_snapshot) * float(effect.amount) / 100.0)
-				_play_resolved_block += _gain_player_block(echoed_block, card.title, false)
+				var baseline_percent: int = effect.amount if base_effect == null else base_effect.amount
+				var baseline_echo_block: int = floori(float(last_block_snapshot) * float(baseline_percent) / 100.0)
+				_play_resolved_block += _gain_player_block(
+					echoed_block, card.title, false, baseline_echo_block, card.upgrade_id != &""
+				)
 				_log("回响上一张守式已结算格挡的 %d%%：%d。" % [effect.amount, echoed_block])
+				_apply_echo_hyoid()
 				_on_boss_echo_resolved()
 			else:
 				_log("回响失败：紧邻上一张牌不是守式。")
@@ -472,11 +491,15 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 			_log("本回合下一次裂解伤害将变为 0。")
 		CardEffect.Kind.DISSOLUTION_ATTACK:
 			var dissolution_damage: int = effect.amount + instability * effect.factor
+			var baseline_amount: int = effect.amount if base_effect == null else base_effect.amount
+			var baseline_factor: int = effect.factor if base_effect == null else base_effect.factor
+			var baseline_dissolution: int = baseline_amount + instability * baseline_factor
 			var dissolution_target: int = TargetSelector.resolve_enemy(
 				effect.target_kind, build_target_context()
 			)
 			_play_resolved_damage += _deal_damage_to_enemy(
-				dissolution_damage, get_card_effective_type(card), card.title, dissolution_target
+				dissolution_damage, get_card_effective_type(card), card.title, dissolution_target,
+				baseline_dissolution, card.upgrade_id != &""
 			)
 			instability = 0
 			_log("崩解协议将不稳定清零。")
@@ -497,9 +520,8 @@ func _apply_chosen_effect(effect: CardEffect, target_index: int) -> void:
 			original.cost_override_this_turn = 0
 			var copy: CardData = _make_card_from_catalog(original.id, original.upgrade_id)
 			copy.temporary = true
-			copy.sealed_turns = 1
-			sealed_zone.append(copy)
-			_log("预写结局：复制《%s》并封存 1；原牌本回合费用变为 0。" % original.title)
+			_seal_card(copy, 1, "预写结局复制的《%s》" % original.title)
+			_log("预写结局：复制《%s》并封存；原牌本回合费用变为 0。" % original.title)
 		CardEffect.Kind.UNSEAL_CHOSEN:
 			var chosen: CardData = sealed_zone[target_index]
 			chosen.sealed_turns = 0
@@ -1076,6 +1098,22 @@ func get_player_status_text() -> String:
 	return rule_engine.get_status_text()
 
 
+func get_relic_hud_text() -> String:
+	if rule_engine.relics.is_empty():
+		return "遗物：无"
+	var telemetry: Dictionary = rule_engine.get_relic_telemetry()
+	var counts: Dictionary = telemetry[&"trigger_counts"]
+	var parts: Array[String] = []
+	for relic_id: StringName in rule_engine.relics:
+		var definition: Dictionary = RelicCatalog.get_definition(relic_id)
+		parts.append("%s｜%s｜本场触发 %d" % [
+			definition.get(&"title", relic_id),
+			definition.get(&"short_description", definition.get(&"description", "")),
+			int(counts.get(relic_id, 0)),
+		])
+	return "\n".join(parts)
+
+
 ## 返回规则层只读遥测快照；模拟与测试读取此处，不从日志或 UI 反推规则事件。
 func get_telemetry() -> Dictionary:
 	var relic_telemetry: Dictionary = rule_engine.get_relic_telemetry()
@@ -1093,6 +1131,7 @@ func _start_player_turn() -> void:
 	_ended_hand_snapshot.clear()
 	player_block = 0
 	energy = BASE_ENERGY
+	rule_engine.begin_player_turn()
 	instability_gained_this_turn = false
 	cards_played_this_turn = 0
 	attack_played_this_turn = false
@@ -1148,7 +1187,9 @@ func _unseal_card_at(index: int) -> void:
 	_restore_earliest_boss_type_edit()
 	match card.id:
 		&"delayed_guard":
-			var gained: int = _gain_player_block(card.value(&"unseal_block", 12), card.title, false)
+			var gained: int = _gain_player_block(
+				card.value(&"unseal_block", 12), card.title, false, 12, card.upgrade_id != &""
+			)
 			_log("解封效果：获得 %d 格挡。" % gained)
 		&"countdown_scar":
 			var target: int = TargetSelector.resolve_enemy(
@@ -1241,6 +1282,16 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 	return effects
 
 
+func _base_effect_for_current_index(card: CardData) -> CardEffect:
+	if card == null or card.upgrade_id == &"":
+		return null
+	var base_card: CardData = CardCatalog.create_card(card.id, card.instance_id)
+	var base_effects: Array[CardEffect] = _generate_card_effects(base_card)
+	if _play_effect_index < 0 or _play_effect_index >= base_effects.size():
+		return null
+	return base_effects[_play_effect_index]
+
+
 func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect]) -> Array[CardEffect]:
 	if not boss_deleted_keywords.has(card.instance_id):
 		return effects
@@ -1263,11 +1314,47 @@ func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect])
 
 # ------------------------------------------------------------------ 数值结算
 
-func _gain_player_block(amount: int, source_name: String, write_log: bool = true) -> int:
-	var gained: int = rule_engine.compute_block(amount)
+func _seal_card(card: CardData, base_turns: int, source_name: String) -> void:
+	var adjusted_turns: int = rule_engine.adjust_first_seal_countdown(base_turns)
+	card.sealed_turns = adjusted_turns
+	sealed_zone.append(card)
+	_log("%s进入封存区，倒计时 %d。" % [source_name, adjusted_turns])
+	if adjusted_turns < base_turns:
+		_log("延迟齿轮触发：倒计时 %d → %d；本效果队列不立即解封，将在下一次封存结算窗口处理。" % [
+			base_turns, adjusted_turns,
+		])
+
+
+func _apply_echo_hyoid() -> void:
+	var bonus_block: int = rule_engine.consume_echo_hyoid_block()
+	if bonus_block <= 0:
+		return
+	var gained: int = _gain_player_block(bonus_block, "复读舌骨", false)
+	_log("复读舌骨触发：本回合第一次成功回响，额外获得 %d 格挡。" % gained)
+
+
+func _log_red_pen_if_just_triggered() -> void:
+	var telemetry: Dictionary = rule_engine.get_relic_telemetry()
+	var counts: Dictionary = telemetry[&"trigger_counts"]
+	var current: int = int(counts.get(&"calibrator_red_pen", 0))
+	if current <= _logged_red_pen_triggers:
+		return
+	_logged_red_pen_triggers = current
+	_log("校准官的红笔触发：升级实例本次正伤害或格挡高于未升级基线，首个符合结果额外 +3。")
+
+
+func _gain_player_block(
+	amount: int,
+	source_name: String,
+	write_log: bool = true,
+	upgrade_baseline: int = -1,
+	is_upgraded: bool = false
+) -> int:
+	var gained: int = rule_engine.compute_block(amount, upgrade_baseline, is_upgraded)
 	player_block += gained
 	if write_log and gained > 0:
 		_log("《%s》使你获得 %d 格挡。" % [source_name, gained])
+	_log_red_pen_if_just_triggered()
 	return gained
 
 
@@ -1281,15 +1368,23 @@ func _gain_instability(amount: int) -> void:
 	_log("超载 %d：不稳定升至 %d。" % [gained, instability])
 
 
-func _deal_damage_to_enemy(base_amount: int, source_type: int, source_name: String, target_index: int) -> int:
+func _deal_damage_to_enemy(
+	base_amount: int,
+	source_type: int,
+	source_name: String,
+	target_index: int,
+	upgrade_baseline: int = -1,
+	is_upgraded: bool = false
+) -> int:
 	if base_amount <= 0 or battle_over or boss_terminal_choice_pending:
 		return 0
 	if target_index == TargetSelector.NO_TARGET:
 		_log("《%s》没有可攻击的目标。" % source_name)
 		return 0
 	var amount: int = rule_engine.compute_damage_to_enemy(
-		base_amount, source_type == CardData.CardType.ATTACK
+		base_amount, source_type == CardData.CardType.ATTACK, upgrade_baseline, is_upgraded
 	)
+	_log_red_pen_if_just_triggered()
 	if amount <= 0:
 		return 0
 	_record_devour(source_type)
@@ -1326,11 +1421,18 @@ func _deal_damage_to_player(base_amount: int, source_name: String) -> void:
 	var blocked: int = mini(player_block, amount)
 	player_block -= blocked
 	var hp_damage: int = amount - blocked
-	player_hp = maxi(0, player_hp - hp_damage)
+	var previous_hp: int = player_hp
+	var bell_triggered: bool = rule_engine.consume_expired_return_bell(hp_damage >= player_hp and hp_damage > 0)
+	player_hp = 1 if bell_triggered else maxi(0, player_hp - hp_damage)
 	_log("%s使用%s：造成 %d 伤害（格挡抵消 %d），你的生命 %d/%d。" % [
 		enemy_name, source_name, hp_damage, blocked, player_hp, player_max_hp,
 	])
-	_check_player_defeat()
+	_trigger_blank_epitaph(previous_hp)
+	if bell_triggered:
+		_log("过期返航铃触发：本次致命伤害后保留 1 生命；立即执行裂解，你可能仍被后续裂解杀死。")
+		_resolve_fracture(false, "返航铃后续裂解")
+	else:
+		_check_player_defeat()
 
 
 func _record_devour(source_type: int) -> void:
@@ -1500,17 +1602,53 @@ func _discard_contains_status_from_this_turn() -> bool:
 func _check_fracture() -> void:
 	if instability < instability_threshold or battle_over:
 		return
-	instability -= instability_threshold
+	_resolve_fracture(true, "不稳定阈值")
+
+
+func _resolve_fracture(consume_instability: bool, source_name: String) -> void:
+	if battle_over:
+		return
+	if consume_instability:
+		instability -= instability_threshold
 	_telemetry_fractures += 1
-	var damage: int = rule_engine.compute_fracture_damage(fracture_damage, prevent_next_fracture_damage)
-	if prevent_next_fracture_damage:
+	var prevented: bool = prevent_next_fracture_damage
+	var damage: int = rule_engine.compute_fracture_damage(fracture_damage, prevented)
+	if prevented:
 		prevent_next_fracture_damage = false
-	player_hp = maxi(0, player_hp - damage)
-	_log("裂解触发：受到 %d 点不可格挡伤害，不稳定降至 %d，生命 %d/%d。" % [
-		damage, instability, player_hp, player_max_hp,
+	var previous_hp: int = player_hp
+	var bell_triggered: bool = rule_engine.consume_expired_return_bell(damage >= player_hp and damage > 0)
+	player_hp = 1 if bell_triggered else maxi(0, player_hp - damage)
+	var instability_text: String = "不稳定降至 %d" % instability if consume_instability else "不稳定保持 %d" % instability
+	_log("裂解触发（%s）：受到 %d 点不可格挡伤害，%s，生命 %d/%d。" % [
+		source_name, damage, instability_text, player_hp, player_max_hp,
 	])
 	_restore_earliest_boss_keyword_edit()
-	_check_player_defeat()
+	_trigger_blank_epitaph(previous_hp)
+	if bell_triggered:
+		_log("过期返航铃触发：致命裂解后保留 1 生命；立即执行额外裂解，你可能仍被后续裂解杀死。")
+		_resolve_fracture(false, "返航铃后续裂解")
+	else:
+		_check_player_defeat()
+
+
+func _trigger_blank_epitaph(previous_hp: int) -> void:
+	if not rule_engine.consume_blank_epitaph(previous_hp, player_hp, player_max_hp):
+		return
+	var gained: int = _gain_player_block(12, "空白墓志铭", false)
+	var candidates: Array[int] = []
+	for index: int in range(hand.size()):
+		if hand[index].card_type != CardData.CardType.STATUS:
+			candidates.append(index)
+	if candidates.is_empty():
+		_log("空白墓志铭触发：伤害已经结算，获得 %d 格挡；当前手牌没有合规非状态牌，仍消耗本场触发。" % gained)
+		return
+	var chosen_index: int = candidates[rng.randi_range(0, candidates.size() - 1)]
+	var chosen: CardData = hand[chosen_index]
+	hand.remove_at(chosen_index)
+	_seal_card(chosen, 1, "空白墓志铭选中的《%s》" % chosen.title)
+	_log("空白墓志铭触发：伤害已经结算，获得 %d 格挡并随机封存《%s》；新格挡只保护后续伤害。" % [
+		gained, chosen.title,
+	])
 
 
 func _check_player_defeat() -> void:

@@ -122,6 +122,9 @@ func _test_safe_rejections() -> void:
 	(broken["run"]["relics"] as Array).append("unknown_relic")
 	_assert_envelope_rejected(broken, "未知遗物安全失败")
 	broken = envelope.duplicate(true)
+	(broken["run"]["relics"] as Array).append((broken["run"]["relics"] as Array)[0])
+	_assert_envelope_rejected(broken, "重复遗物安全失败")
+	broken = envelope.duplicate(true)
 	(broken["run"]["evidence_records"] as Array).append({
 		"id": "unknown_evidence", "title": "未知", "source": "测试", "description": "测试",
 	})
@@ -163,7 +166,7 @@ func _build_checkpoint_run() -> RunModel:
 	run.ink_crystals = 321
 	run._add_evidence(&"nine_redacted_return_records")
 	run._add_evidence(&"nonexistent_autopsy")
-	run.relics.append(&"echo_hyoid")
+	run.relics = RelicCatalog.get_all_ids()
 	run.next_battle_missing_name = 2
 	run.next_battle_instability_threshold_delta = -1
 	run.next_battle_enemy_strength = 2

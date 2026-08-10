@@ -7,6 +7,8 @@ func _init() -> void:
 	_test_shop_determinism_and_ranges()
 	_test_purchase_atomicity()
 	_test_removal_service()
+	_test_elite_rewards()
+	_test_shop_relic_pool()
 	_test_instance_upgrade()
 	_test_rest_and_forge()
 	_test_rest_salvage_tradeoff()
@@ -80,6 +82,97 @@ func _test_removal_service() -> void:
 	_expect(run.get_deck_card_ids().count(target[&"card_id"]) == same_id_count_before - 1, "other copies remain intact")
 	_expect(run.ink_crystals == 425 and run.shop_remove_count == 1, "removal deducts 75 and increments count")
 	_expect(not shop.remove_card(run, int(run.deck_instances[0][&"instance_id"])), "one shop removal service cannot be reused")
+
+	var stamped: RunModel = RunModel.new()
+	stamped.start_run(73103)
+	stamped.relics.append(&"seventh_dock_stamp")
+	stamped.ink_crystals = 500
+	var stamped_shop: ShopModel = ShopModel.new(ShopCatalog.generate(80011, 0, stamped.relics))
+	var stamped_target: int = int(stamped.deck_instances[0][&"instance_id"])
+	_expect(stamped_shop.get_remove_price(stamped) == 50, "dock stamp lowers removal price by exactly twenty-five")
+	_expect(stamped_shop.remove_card(stamped, stamped_target), "discounted removal succeeds")
+	_expect(stamped.ink_crystals == 450, "discounted removal deducts fifty ink")
+	var telemetry: Dictionary = stamped_shop.get_relic_telemetry()
+	_expect(int((telemetry[&"trigger_counts"] as Dictionary).get(&"seventh_dock_stamp", 0)) == 1, "dock stamp records one consumed discount")
+	_expect(int((telemetry[&"net_benefits"] as Dictionary).get(&"seventh_dock_stamp", 0)) == 25, "dock stamp telemetry records twenty-five ink saved")
+
+
+func _test_elite_rewards() -> void:
+	var selected: RunModel = _enter_elite(73103)
+	_expect(selected.record_current_battle_victory(), "elite victory settles its base reward")
+	_expect(not selected.record_current_battle_victory(), "elite base reward cannot settle twice")
+	_expect(selected.ink_crystals == 30, "elite victory grants exactly thirty ink")
+	var selected_reward: Dictionary = selected.get_pending_elite_reward()
+	_expect(selected_reward.get(&"kind", &"") == &"relic", "elite prepares a relic when an eligible one remains")
+	var selected_relic: StringName = selected_reward.get(&"relic_id", &"") as StringName
+	_expect(selected_relic != &"" and not selected.relics.has(selected_relic), "elite fixed seed chooses an unowned relic")
+	var repeated: RunModel = _enter_elite(73103)
+	repeated.record_current_battle_victory()
+	_expect(repeated.get_pending_elite_reward().get(&"relic_id", &"") == selected_relic, "elite relic choice reproduces for the same seed and ownership")
+	var choices: Array[StringName] = selected.generate_reward_choices(6)
+	_expect(choices.size() == 3, "elite offers three card choices")
+	var rare_count: int = 0
+	for card_id: StringName in choices:
+		if str(CardCatalog.get_definition(card_id).get(&"rarity", "")) == "罕见":
+			rare_count += 1
+	_expect(rare_count >= 1, "elite card choices contain at least one rare card")
+	_expect(not selected.relics.has(selected_relic), "elite relic remains pending before card choice")
+	selected.mark_current_node_resolved()
+	_expect(not selected.complete_current_node(), "elite node cannot complete before card reward settles")
+	_expect(selected.choose_reward(0), "choosing an elite card settles the pending relic")
+	_expect(selected.relics.count(selected_relic) == 1, "card choice grants the elite relic exactly once")
+	var selected_relic_count: int = selected.relics.size()
+	_expect(not selected.choose_reward(0) and not selected.skip_reward(), "settled elite reward cannot be selected or skipped again")
+	_expect(selected.relics.size() == selected_relic_count, "repeated settlement attempts do not duplicate the elite relic")
+	_expect(selected.complete_current_node(), "settled elite node completes once")
+	_expect(not selected.complete_current_node(), "completed elite node cannot complete twice")
+
+	var skipped: RunModel = _enter_elite(73103)
+	skipped.record_current_battle_victory()
+	var skipped_relic: StringName = skipped.get_pending_elite_reward().get(&"relic_id", &"") as StringName
+	skipped.generate_reward_choices(6)
+	_expect(skipped.skip_reward(), "skipping elite cards settles the pending relic")
+	_expect(skipped.relics.count(skipped_relic) == 1, "card skip grants the elite relic exactly once")
+	_expect(not skipped.skip_reward(), "elite card skip cannot settle twice")
+
+	var fallback: RunModel = _enter_elite(73103)
+	for relic_id: StringName in RelicCatalog.get_elite_drop_ids():
+		if not fallback.relics.has(relic_id):
+			fallback.relics.append(relic_id)
+	fallback.record_current_battle_victory()
+	var fallback_reward: Dictionary = fallback.get_pending_elite_reward()
+	_expect(fallback_reward.get(&"kind", &"") == &"ink" and int(fallback_reward.get(&"amount", 0)) == 50, "owning every elite relic prepares fifty replacement ink")
+	_expect(fallback.ink_crystals == 30, "replacement ink remains pending before card resolution")
+	fallback.generate_reward_choices(6)
+	_expect(fallback.skip_reward(), "skipping cards settles elite replacement ink")
+	_expect(fallback.ink_crystals == 80, "elite grants thirty base ink plus fifty replacement ink once")
+	_expect(not fallback.skip_reward() and fallback.ink_crystals == 80, "replacement ink cannot settle twice")
+
+
+func _test_shop_relic_pool() -> void:
+	var purchasable: Array[StringName] = RelicCatalog.get_shop_offer_ids()
+	var stock: Dictionary = ShopCatalog.generate(73103, 0)
+	var relic: Dictionary = stock.get(&"relic", {})
+	var relic_id: StringName = relic.get(&"relic_id", &"") as StringName
+	_expect(relic_id != &"" and purchasable.has(relic_id), "shop relic comes from the purchasable pool")
+	var owned: Array[StringName] = [relic_id]
+	var without_owned: Dictionary = ShopCatalog.generate(73103, 0, owned)
+	var replacement: Dictionary = without_owned.get(&"relic", {})
+	_expect(replacement.is_empty() or replacement.get(&"relic_id", &"") != relic_id, "shop never repeats an owned relic")
+	var exhausted: Dictionary = ShopCatalog.generate(73103, 0, purchasable)
+	_expect((exhausted.get(&"relic", {}) as Dictionary).is_empty(), "shop omits relic stock when the purchasable pool is fully owned")
+
+
+func _enter_elite(seed_value: int) -> RunModel:
+	var run: RunModel = RunModel.new()
+	run.start_run(seed_value)
+	var elite_ids: Array[StringName] = [&"d06_00"]
+	run.available_node_ids = elite_ids
+	var elite: MapNode = run.map_graph.get_node(&"d06_00")
+	elite.revealed = true
+	elite.reachable = true
+	_expect(elite.node_type == MapNode.NodeType.ELITE and run.enter_node(&"d06_00"), "test enters the deterministic elite node")
+	return run
 
 
 func _test_instance_upgrade() -> void:

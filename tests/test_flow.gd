@@ -49,6 +49,7 @@ func _run() -> void:
 
 	await _test_expedition_ui(main)
 	await _test_event_selection_and_event_battle_ui(main)
+	await _test_relic_ui(main)
 
 	# 机制测试场的对手菜单必须列出目录中的每个可选敌人。
 	main._show_test_arena_menu()
@@ -285,6 +286,87 @@ func _test_event_selection_and_event_battle_ui(main) -> void:
 	await process_frame
 	_expect(_tree_contains_text(main.screen_root, "来源：随机事件：校准站"), "archive renders structured evidence source")
 	_expect(_tree_contains_text(main.screen_root, "可替换资产"), "archive renders structured evidence description")
+
+
+func _test_relic_ui(main) -> void:
+	main._restart_run()
+	await process_frame
+	main.run_model.relics = RelicCatalog.get_all_ids()
+	main._show_archive_screen(&"relics")
+	await process_frame
+	for relic_id: StringName in RelicCatalog.get_all_ids():
+		var definition: Dictionary = RelicCatalog.get_definition(relic_id)
+		_expect(_tree_contains_text(main.screen_root, str(definition[&"title"])), "relic archive shows %s title" % relic_id)
+		_expect(_tree_contains_text(main.screen_root, "完整效果：%s" % definition[&"description"]), "relic archive shows %s full effect" % relic_id)
+		_expect(_tree_contains_text(main.screen_root, "风味：%s" % definition[&"flavor"]), "relic archive shows %s flavor" % relic_id)
+	_expect(_tree_contains_text(main.screen_root, "可能仍被后续裂解杀死"), "return bell archive warning is explicit")
+
+	main._restart_run()
+	await process_frame
+	main.run_model.relics.append(&"seventh_dock_stamp")
+	var shop_ids: Array[StringName] = [&"d04_01"]
+	main.run_model.available_node_ids = shop_ids
+	var shop_node: MapNode = main.run_model.map_graph.get_node(&"d04_01")
+	shop_node.revealed = true
+	shop_node.reachable = true
+	main._on_map_node_pressed(&"d04_01")
+	await process_frame
+	var shop_digest: String = ShopCatalog.digest(main.run_model.pending_shop_stock)
+	_expect(_find_button_with_text(main.screen_root, "查看旧档案") != null, "dock stamp exposes the old archive action in shop UI")
+	main._show_shop_archive()
+	await process_frame
+	_expect(main.ui_mode == &"shop_archive" and _tree_contains_text(main.screen_root, "第七码头旧档案"), "shop old archive opens from the stamp action")
+	_expect(_tree_contains_text(main.screen_root, "‘自愿’一词使用另一种墨水统一补录"), "shop old archive renders its full record")
+	_expect(ShopCatalog.digest(main.run_model.pending_shop_stock) == shop_digest, "shop old archive leaves frozen stock unchanged")
+
+	main._restart_run()
+	await process_frame
+	var elite_ids: Array[StringName] = [&"d06_00"]
+	main.run_model.available_node_ids = elite_ids
+	var elite_node: MapNode = main.run_model.map_graph.get_node(&"d06_00")
+	elite_node.revealed = true
+	elite_node.reachable = true
+	main._on_map_node_pressed(&"d06_00")
+	await process_frame
+	main.model.battle_over = true
+	main.model.victory = true
+	main._on_battle_result_pressed()
+	await process_frame
+	var pending: Dictionary = main.run_model.get_pending_elite_reward()
+	var pending_relic: StringName = pending.get(&"relic_id", &"") as StringName
+	_expect(main.ui_mode == &"reward" and _find_named(main.screen_root, "EliteRelicReward") != null, "elite victory opens the dedicated relic reward panel")
+	_expect(_tree_contains_text(main.screen_root, "精英卡池保证至少 1 张罕见"), "elite reward UI explains its rare-card guarantee")
+	_expect(_tree_contains_text(main.screen_root, "选择或跳过卡牌后领取"), "elite reward UI explains delayed relic settlement")
+	_expect(pending_relic != &"" and not main.run_model.relics.has(pending_relic), "elite UI keeps the relic pending before card resolution")
+	main._on_reward_skipped()
+	await process_frame
+	_expect(main.run_model.relics.count(pending_relic) == 1, "elite UI skip settles the relic once")
+	_expect(elite_node.completed and not main.run_model.complete_current_node(), "elite UI completes its node exactly once")
+
+	main.is_test_mode = true
+	main.run_model = RunModel.new()
+	main.run_model.start_run(73103)
+	main.run_model.relics = RelicCatalog.get_all_ids()
+	main.current_stage = CombatModel.TUTORIAL_STAGE_MAX
+	main._start_current_battle()
+	await process_frame
+	var relic_hud: RichTextLabel = _find_named(main.screen_root, "RelicHUD") as RichTextLabel
+	_expect(relic_hud != null, "combat creates RelicHUD")
+	if relic_hud != null:
+		for relic_id: StringName in RelicCatalog.get_all_ids():
+			_expect(relic_hud.text.contains(str(RelicCatalog.get_definition(relic_id)[&"title"])), "RelicHUD shows %s" % relic_id)
+		_expect(relic_hud.text.contains("本场触发 0"), "RelicHUD shows live trigger counts")
+		_expect(relic_hud.text.contains("可能仍被后续裂解杀死"), "RelicHUD keeps the return bell death warning explicit")
+
+
+func _find_named(node: Node, wanted: String) -> Node:
+	if node.name == wanted:
+		return node
+	for child: Node in node.get_children():
+		var found: Node = _find_named(child, wanted)
+		if found != null:
+			return found
+	return null
 
 
 func _find_button_with_text(node: Node, fragment: String) -> Button:
