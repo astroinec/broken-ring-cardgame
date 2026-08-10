@@ -11,6 +11,7 @@ var devour_record_type: int = -1
 var reverse_record_type: int = -1
 var stone_shell_broken: bool = false
 var player_hand_has_status: bool = false
+var player_has_missing_name: bool = false
 
 
 func devour_type_display_name() -> String:

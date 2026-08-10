@@ -36,6 +36,9 @@ var player_max_hp: int = 70
 var player_hp: int = 70
 var next_battle_missing_name: int = 0
 var completed_battles: Array[int] = []
+var boss_ending_id: StringName = &""
+var boss_ending_text: String = ""
+var run_completed: bool = false
 
 var shop_remove_count: int = 0
 var pending_shop_stock: Dictionary = {}
@@ -67,6 +70,9 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 	player_hp = 70
 	next_battle_missing_name = 0
 	completed_battles.clear()
+	boss_ending_id = &""
+	boss_ending_text = ""
+	run_completed = false
 	shop_remove_count = 0
 	pending_shop_stock.clear()
 	pending_node_resolution.clear()
@@ -396,12 +402,40 @@ func skip_rest() -> bool:
 	return mark_current_node_resolved()
 
 
-func acknowledge_boss_placeholder() -> bool:
+func record_boss_outcome(choice_id: StringName, recovery_count: int) -> bool:
+	last_action_error = ""
 	var node: MapNode = get_current_map_node()
 	if node == null or node.node_type != MapNode.NodeType.BOSS:
+		last_action_error = "当前节点不是Boss战"
 		return false
-	event_outcome = "章节终点尚未接入。M1不包含正式Boss逻辑。"
+	if bool(pending_node_resolution.get(&"resolved", false)) or run_completed:
+		last_action_error = "Boss结局已经记录"
+		return false
+	if choice_id != &"deliver_seal" and choice_id != &"read_original":
+		last_action_error = "未知Boss终结选项"
+		return false
+	if choice_id == &"read_original" and recovery_count < CombatModel.BOSS_RECOVERY_REQUIRED:
+		last_action_error = "读取被删原文需要至少两次恢复"
+		return false
+	boss_ending_id = choice_id
+	run_completed = true
+	pending_node_resolution[&"boss_choice"] = choice_id
+	pending_node_resolution[&"boss_recoveries"] = recovery_count
+	if choice_id == &"read_original":
+		_add_evidence("第十份校准记录")
+		boss_ending_text = "你没有立即交出律印，而是读取了被删原文。九种互相冲突的文明答案都写在 REC-10 名下。\n\n弥拉低声说：‘第十种答案，欢迎返航。’她停顿片刻，又改口：‘第七名回收者。’"
+	else:
+		boss_ending_text = "你按终末机构命令交付定义律印。无字之城暂时停止坍缩，REC-10 档案在返航前重新封闭。"
+	event_outcome = boss_ending_text
 	return mark_current_node_resolved()
+
+
+func get_boss_ending_title() -> String:
+	if boss_ending_id == &"read_original":
+		return "被删原文"
+	if boss_ending_id == &"deliver_seal":
+		return "定义律印已交付"
+	return "远征尚未结算"
 
 
 func begin_event() -> StringName:
@@ -519,10 +553,13 @@ func apply_event_choice(choice_index: int, event_id: StringName = selected_event
 
 
 func get_summary_text() -> String:
-	return "固定种子 %d｜当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
+	var summary: String = "固定种子 %d｜当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
 		seed_value, current_node, _completed_node_count(), deck_instances.size(), ink_crystals,
 		evidence.size(), player_hp, player_max_hp,
 	]
+	if run_completed:
+		summary += "｜结局：%s" % get_boss_ending_title()
+	return summary
 
 
 func _add_deck_card(card_id: StringName, acquired: bool, upgrade_id: StringName = &"") -> int:

@@ -329,7 +329,7 @@ func _on_map_node_pressed(node_id: StringName) -> void:
 		MapNode.NodeType.REST:
 			_show_rest_screen()
 		MapNode.NodeType.BOSS:
-			_show_boss_placeholder()
+			_start_current_battle()
 
 
 func _show_shop_screen() -> void:
@@ -496,35 +496,70 @@ func _on_rest_skip_pressed() -> void:
 		_show_map_screen()
 
 
-func _show_boss_placeholder() -> void:
-	ui_mode = &"boss_placeholder"
+func _show_boss_terminal_screen() -> void:
+	ui_mode = &"boss_terminal"
 	_clear_screen()
-	var boss_page: VBoxContainer = _create_page("章节终点尚未接入", "M1 Boss占位：不冒充正式Boss战。")
-	var content: VBoxContainer = _add_page_scroll(boss_page, "BossContent")
-	content.alignment = BoxContainer.ALIGNMENT_CENTER
-	var note: Label = Label.new()
-	note.text = "你已经抵达第九层。此处只记录远征抵达，不运行尚未实现的正式 Boss 规则。"
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	content.add_child(note)
-	var footer: HBoxContainer = _add_page_footer(boss_page)
-	var finish: Button = _configure_button(Button.new(), 50)
-	finish.text = "记录抵达并结束本次骨架验证"
-	finish.pressed.connect(_on_boss_placeholder_finished)
-	footer.add_child(finish)
+	var terminal_page: VBoxContainer = _create_page(
+		"未完成的删除",
+		"删名者生命锁定为 1，已经从伤害目标中移除。选择将由战斗规则层校验。"
+	)
+	var content: VBoxContainer = _add_page_scroll(terminal_page, "BossTerminalContent")
+	var record: Label = Label.new()
+	record.text = "%s\n\n%s" % [model.get_boss_status_text(), model.boss_terminal_result_text]
+	record.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	record.add_theme_font_size_override("font_size", 20)
+	record.add_theme_color_override("font_color", Color("e7d9b5"))
+	content.add_child(record)
+	for option: Dictionary in model.get_boss_terminal_options():
+		var option_button: Button = _configure_button(Button.new(), 78)
+		var reason: String = str(option[&"reason"])
+		option_button.text = "%s%s" % [
+			str(option[&"label"]), "\n不可用：%s" % reason if not reason.is_empty() else "",
+		]
+		option_button.disabled = not bool(option[&"enabled"])
+		option_button.tooltip_text = reason
+		option_button.pressed.connect(_on_boss_terminal_choice.bind(option[&"id"] as StringName))
+		content.add_child(option_button)
+	var footer: HBoxContainer = _add_page_footer(terminal_page)
+	var condition: Label = Label.new()
+	condition.text = "读取被删原文条件：实际恢复 %d/%d。选择后结束本次远征。" % [
+		model.boss_recovery_count, CombatModel.BOSS_RECOVERY_REQUIRED,
+	]
+	condition.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	condition.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	condition.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(condition)
 
 
-func _on_boss_placeholder_finished() -> void:
-	if run_model.acknowledge_boss_placeholder() and run_model.complete_current_node():
+func _on_boss_terminal_choice(option_id: StringName) -> void:
+	if not model.choose_boss_terminal(option_id):
+		_show_boss_terminal_screen()
+		return
+	if is_test_mode:
+		_show_main_menu()
+		return
+	run_model.player_hp = model.player_hp
+	if run_model.record_boss_outcome(model.boss_terminal_choice, model.boss_recovery_count) and run_model.complete_current_node():
 		_show_expedition_complete_screen()
 
 
 func _show_expedition_complete_screen() -> void:
 	ui_mode = &"expedition_complete"
 	_clear_screen()
-	var complete_page: VBoxContainer = _create_page("已抵达章节终点", "正式Boss将在M2接入。")
+	var complete_page: VBoxContainer = _create_page(
+		run_model.get_boss_ending_title(),
+		"无字之城 / 最小章节结算"
+	)
 	var content: VBoxContainer = _add_page_scroll(complete_page, "CompleteSummary")
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	var ending: Label = Label.new()
+	ending.text = run_model.boss_ending_text
+	ending.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ending.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ending.add_theme_font_size_override("font_size", 22)
+	ending.add_theme_color_override("font_color", Color("e7d9b5"))
+	content.add_child(ending)
 	var summary: Label = Label.new()
 	summary.text = run_model.get_summary_text()
 	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -638,13 +673,17 @@ func _build_combat_screen() -> void:
 	var header: HBoxContainer = HBoxContainer.new()
 	page.add_child(header)
 	var title: Label = Label.new()
-	title.text = "断环  /  机制测试场" if is_test_mode else "断环  /  无字之城"
+	title.text = "断环  /  机制测试场" if is_test_mode else (
+		"断环  /  无字之城·删名者" if model.is_name_eraser_battle() else "断环  /  无字之城"
+	)
 	title.add_theme_font_size_override("font_size", 25)
 	title.add_theme_color_override("font_color", Color("e7d9b5"))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 	var stage_label: Label = Label.new()
-	stage_label.text = "独立测试 / 不计入远征" if is_test_mode else model.get_stage_progress_text()
+	stage_label.text = "独立测试 / 不计入远征" if is_test_mode else (
+		"第9层｜正式Boss战" if model.is_name_eraser_battle() else model.get_stage_progress_text()
+	)
 	stage_label.add_theme_font_size_override("font_size", 20)
 	stage_label.add_theme_color_override("font_color", Color("ffd27d"))
 	header.add_child(stage_label)
@@ -694,7 +733,10 @@ func _build_combat_screen() -> void:
 		"生命 %d/%d　格挡 %d" % [model.enemy_hp, model.enemy_max_hp, model.get_enemy_total_block()],
 		18, Color("e4d4d8")
 	)
-	if model.is_mechanic_unlocked(&"missing_name"):
+	if model.is_name_eraser_battle():
+		_add_centered(enemy_column, model.get_enemy_record_text(), 14, Color("e0a9ba"))
+		_add_centered(enemy_column, "缺名：%s" % model.get_missing_name_text(), 15, Color("c99bad"))
+	elif model.is_mechanic_unlocked(&"missing_name"):
 		_add_centered(enemy_column, "%s｜%s" % [model.get_enemy_record_text(), model.get_missing_name_text()], 16, Color("e0a9ba"))
 	if model.is_mechanic_unlocked(&"intent"):
 		_add_centered(enemy_column, "下一意图 / %s" % model.get_enemy_intent_text(), 20, Color("ffd27d"))
@@ -759,6 +801,9 @@ func _build_combat_screen() -> void:
 
 
 func _refresh_combat() -> void:
+	if model.boss_terminal_choice_pending:
+		_show_boss_terminal_screen()
+		return
 	_build_combat_screen()
 	# 规则层是唯一真相源：UI 只询问“现在是否有待选择请求”，
 	# 并把玩家点击原样转交给规则层，自己不保存任何选择状态。
@@ -796,14 +841,18 @@ func _build_hand_row() -> void:
 		var button: Button = Button.new()
 		var cost: int = model.get_card_cost(card)
 		var unplayable: bool = card.card_type == CardData.CardType.STATUS and card.base_cost >= 99
-		button.custom_minimum_size = Vector2(184, 135)
+		button.custom_minimum_size = Vector2(220 if model.is_name_eraser_battle() else 184, 150 if model.is_name_eraser_battle() else 135)
+		var cost_text: String = "不可打出" if unplayable else model.get_card_cost_display(card)
 		button.text = "%s
-[%s·%s] %s
-
+%s｜%s｜%s
+%s
 %s" % [
-			card.title, card.type_name(), card.rarity,
-			"不可打出" if unplayable else "费用%d" % cost, card.description,
+			card.title, model.get_card_type_display(card), card.rarity, cost_text,
+			model.get_card_keyword_display(card), card.description,
 		]
+		var recovery_text: String = model.get_card_boss_edit_text(card)
+		if not recovery_text.is_empty():
+			button.text += "\n%s" % recovery_text
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.tooltip_text = "%s
 

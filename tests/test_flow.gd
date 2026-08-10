@@ -181,11 +181,37 @@ func _test_expedition_ui(main) -> void:
 
 	main._on_map_node_pressed(&"d09_00")
 	await process_frame
-	_expect(main.ui_mode == &"boss_placeholder", "depth-nine node clearly opens the Boss placeholder")
-	main._on_boss_placeholder_finished()
+	_expect(main.ui_mode == &"combat", "depth-nine node opens the formal Boss combat UI")
+	_expect(main.model.enemy_id == &"name_eraser" and main.model.boss_phase == 1, "depth-nine combat uses the phase-one name eraser")
+	main.model.boss_phase = 2
+	var deleted_card: CardData = main.model.hand[0]
+	main.model._delete_boss_card_type(deleted_card)
+	main._refresh_combat()
 	await process_frame
-	_expect(main.ui_mode == &"expedition_complete", "Boss placeholder acknowledgement reaches the expedition summary")
-	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "Boss placeholder can only be completed once through the node protocol")
+	_expect(_tree_contains_text(main.hand_box, "类别：已删除"), "Boss hand cards visibly expose category deletion")
+	_expect(_tree_contains_text(main.page, "REC-10 / 可覆写载体"), "Boss combat visibly exposes archive and deletion state")
+	main.model.boss_recovery_count = 2
+	main.model._enter_boss_terminal()
+	main._refresh_combat()
+	await process_frame
+	_expect(main.ui_mode == &"boss_terminal", "terminal hp lock opens the two-option Boss page")
+	_expect(_tree_contains_text(main.screen_root, "交付定义律印") and _tree_contains_text(main.screen_root, "读取被删原文"), "terminal page renders both rule-layer options")
+	main._on_boss_terminal_choice(&"read_original")
+	await process_frame
+	_expect(main.ui_mode == &"expedition_complete", "Boss terminal choice reaches the expedition settlement")
+	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "formal Boss can only be completed once through the node protocol")
+	_expect(main.run_model.evidence.has("第十份校准记录"), "hidden Boss ending reaches RunModel evidence")
+
+
+func _tree_contains_text(node: Node, fragment: String) -> bool:
+	if node is Button and (node as Button).text.contains(fragment):
+		return true
+	if node is Label and (node as Label).text.contains(fragment):
+		return true
+	for child: Node in node.get_children():
+		if _tree_contains_text(child, fragment):
+			return true
+	return false
 
 
 func _expect(condition: bool, label: String) -> void:

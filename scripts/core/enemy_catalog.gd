@@ -348,6 +348,73 @@ const DEFINITIONS: Dictionary = {
 		],
 	},
 
+	&"name_eraser": {
+		&"name": "删名者", &"tier": "Boss", &"hp_min": 168, &"hp_max": 168,
+		&"traits": [EnemyDefinition.TRAIT_NAME_ERASER],
+		&"phase_intent_ranges": {1: [0, 4], 2: [4, 4]},
+		&"intro_line": "REC-10 校对记录开启。它举起红笔，先看向你的牌名。",
+		&"intents": [
+			{
+				&"id": &"tamper_cost", &"name": "篡改费用",
+				&"description": "从抽牌堆与弃牌堆选择 2 个不同实例，费用 +1；连续打出三种不同正式类别可恢复最早一项",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.EDIT_CARD_COSTS, &"amount": 2},
+				],
+			},
+			{
+				&"id": &"red_pen_strike", &"name": "红笔划除", &"description": "造成 8×2 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 8, &"times": 2, &"action": "红笔划除"},
+				],
+			},
+			{
+				&"id": &"margin_note", &"name": "边注", &"description": "将 2 张《删节》洗入抽牌堆",
+				&"operations": [
+					{
+						&"kind": EnemyOperation.Kind.ADD_CARD_TO_DRAW_PILE, &"amount": 2,
+						&"card_id": &"redaction", &"log": "{enemy}写下边注：2 张《删节》洗入抽牌堆。",
+					},
+				],
+			},
+			{
+				&"id": &"proof_complete", &"name": "校对完成", &"description": "获得 14 点格挡；下一次攻击额外造成 6 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.GAIN_BLOCK, &"amount": 14, &"log": "{enemy}完成校对，获得 14 格挡。"},
+					{&"kind": EnemyOperation.Kind.EMPOWER_NEXT_ATTACK, &"amount": 6, &"log": "红笔标记：下一次攻击强化 6 点。"},
+				],
+			},
+			{
+				&"id": &"delete_type", &"name": "删除类别",
+				&"description": "标记下次抽到的第一张非状态牌：进入手牌时失去类别；封存牌解封可恢复最早一项",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.MARK_NEXT_DRAW_TYPE_DELETION},
+				],
+			},
+			{
+				&"id": &"ownerless_sentence", &"name": "无主宣判",
+				&"description": "造成 16 点伤害；存在任意缺名时改为 22",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 22, &"condition": EnemyOperation.Condition.PLAYER_HAS_MISSING_NAME, &"action": "无主宣判（缺名）"},
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 16, &"condition": EnemyOperation.Condition.PLAYER_HAS_NO_MISSING_NAME, &"action": "无主宣判"},
+				],
+			},
+			{
+				&"id": &"delete_keywords", &"name": "删除关键词",
+				&"description": "固定种子选择手牌中 1 张带关键词牌，禁用其关键词附加效果；裂解可恢复最早一项",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.DELETE_HAND_KEYWORDS, &"amount": 1},
+				],
+			},
+			{
+				&"id": &"return_original", &"name": "返还原稿",
+				&"description": "清除全部缺名；每清除 1 层，力量 +3",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.CLEAR_MISSING_NAME_GAIN_STRENGTH},
+				],
+			},
+		],
+	},
+
 	# ---------- 数值模拟专用敌人：不进入 PATH_ENEMY_IDS 或 TEST_ARENA_ENEMY_IDS ----------
 	&"pressure_archivist": {
 		&"name": "压力校勘体", &"tier": "测试", &"hp_min": 112, &"hp_max": 112,

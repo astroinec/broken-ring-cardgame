@@ -40,5 +40,5 @@ func type_name() -> String:
 		NodeType.REST:
 			return "休整"
 		NodeType.BOSS:
-			return "Boss占位"
+			return "Boss战"
 	return "未知节点"

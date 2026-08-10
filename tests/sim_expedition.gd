@@ -98,7 +98,8 @@ func _simulate(seed_value: int, policy: RoutePolicy) -> Dictionary:
 				run.skip_rest()
 				run.complete_current_node()
 			MapNode.NodeType.BOSS:
-				run.acknowledge_boss_placeholder()
+				# 远征经济模拟只验证路线/经济；Boss战本体由sim_boss覆盖。
+				run.record_boss_outcome(&"deliver_seal", 0)
 				run.complete_current_node()
 				break
 	var unique_ids: Dictionary = {}

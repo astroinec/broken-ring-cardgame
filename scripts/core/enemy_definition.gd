@@ -14,6 +14,7 @@ const TRAIT_DEVOUR: StringName = &"devour"            ## 吞字记录
 const TRAIT_STONE_SHELL: StringName = &"stone_shell"  ## 石壳与同式适应
 const TRAIT_REVERSE_READ: StringName = &"reverse_read"## 倒读记录
 const TRAIT_BINDING: StringName = &"binding"          ## 装订被动
+const TRAIT_NAME_ERASER: StringName = &"name_eraser"  ## 删名者两阶段规则
 
 var id: StringName = &""
 var display_name: String = ""
@@ -28,6 +29,7 @@ var stone_shell_regen: int = 0
 var stone_shell_adapt_block: int = 0
 var binding_draw_threshold: int = 0
 var binding_card_id: StringName = &""
+var phase_intent_ranges: Dictionary = {}
 var intro_line: String = ""
 
 
@@ -45,6 +47,7 @@ static func from_data(enemy_id: StringName, data: Dictionary) -> EnemyDefinition
 	definition.binding_draw_threshold = int(data.get(&"binding_draw_threshold", 0))
 	if data.has(&"binding_card_id"):
 		definition.binding_card_id = data[&"binding_card_id"]
+	definition.phase_intent_ranges = (data.get(&"phase_intent_ranges", {}) as Dictionary).duplicate(true)
 	definition.intro_line = str(data.get(&"intro_line", ""))
 	var raw_traits: Array = data.get(&"traits", [])
 	for raw_trait: Variant in raw_traits:
@@ -63,8 +66,13 @@ func intent_count() -> int:
 	return intents.size()
 
 
+func intent_count_for_phase(phase: int) -> int:
+	var range_data: Array = phase_intent_ranges.get(phase, [])
+	return intents.size() if range_data.size() != 2 else int(range_data[1])
+
+
 ## 顺序模式下按索引取意图；倒读模式下按记录类别取意图。
-func select_intent(intent_index: int, reverse_record_type: int) -> EnemyIntent:
+func select_intent(intent_index: int, reverse_record_type: int, phase: int = 0) -> EnemyIntent:
 	if intents.is_empty():
 		return null
 	if intent_mode == IntentMode.REVERSE_RECORD:
@@ -72,6 +80,11 @@ func select_intent(intent_index: int, reverse_record_type: int) -> EnemyIntent:
 			if intent.matches_reverse_record(reverse_record_type):
 				return intent
 		return intents[0]
+	var range_data: Array = phase_intent_ranges.get(phase, [])
+	if range_data.size() == 2:
+		var offset: int = int(range_data[0])
+		var count: int = int(range_data[1])
+		return intents[offset + intent_index % count]
 	return intents[intent_index % intents.size()]
 
 

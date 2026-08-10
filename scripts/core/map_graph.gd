@@ -121,8 +121,8 @@ func validate() -> Array[String]:
 			if node.node_type == MapNode.NodeType.EVENT:
 				if node.event_id == &"" or node.enemy_id != &"":
 					errors.append("事件节点%s内容字段不合法" % node.id)
-			elif node.node_type == MapNode.NodeType.BATTLE or node.node_type == MapNode.NodeType.ELITE:
-				if node.enemy_id == &"" or node.event_id != &"":
+			elif node.node_type == MapNode.NodeType.BATTLE or node.node_type == MapNode.NodeType.ELITE or node.node_type == MapNode.NodeType.BOSS:
+				if node.enemy_id == &"" or node.event_id != &"" or not EnemyCatalog.has_enemy(node.enemy_id):
 					errors.append("战斗节点%s内容字段不合法" % node.id)
 			elif node.enemy_id != &"" or node.event_id != &"":
 				errors.append("非战斗/事件节点%s不应持有敌人或事件ID" % node.id)
@@ -173,8 +173,7 @@ func _assign_content(node: MapNode) -> void:
 		MapNode.NodeType.EVENT:
 			node.event_id = EVENT_IDS[content_rng.randi_range(0, EVENT_IDS.size() - 1)]
 		MapNode.NodeType.BOSS:
-			# M1只提供章节终点占位，不绑定正式Boss敌人定义。
-			node.enemy_id = &""
+			node.enemy_id = &"name_eraser"
 
 
 func _boss_is_reachable() -> bool:

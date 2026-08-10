@@ -18,6 +18,10 @@ const INSTABILITY_THRESHOLD: int = 10
 const FRACTURE_DAMAGE: int = 8
 const TUTORIAL_STAGE_MIN: int = 1
 const TUTORIAL_STAGE_MAX: int = 6
+const BOSS_PHASE_TWO_THRESHOLD: int = 100
+const BOSS_TERMINAL_HP: int = 1
+const BOSS_RECOVERY_REQUIRED: int = 2
+const BOSS_KEYWORDS: Array[StringName] = [&"超载", &"封存", &"回响", &"消逝"]
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var seed_value: int = DEFAULT_SEED
@@ -60,6 +64,22 @@ var last_nonstatus_card_type: int = -1
 var extra_draws_this_turn: int = 0
 var binding_triggered_this_turn: bool = false
 
+## 删名者专属战斗状态。所有编辑都只引用本场 CardData.instance_id。
+var boss_phase: int = 0
+var boss_transition_pending: bool = false
+var boss_terminal_choice_pending: bool = false
+var boss_recovery_count: int = 0
+var boss_strength: int = 0
+var boss_cost_edits: Dictionary = {}
+var boss_deleted_types: Dictionary = {}
+var boss_deleted_keywords: Dictionary = {}
+var boss_type_sequence: Array[int] = []
+var boss_last_recovery_text: String = ""
+var boss_delete_next_draw_type: bool = false
+var boss_terminal_choice: StringName = &""
+var boss_terminal_result_text: String = ""
+var _boss_edit_order: int = 0
+
 var draw_pile: Array[CardData] = []
 var hand: Array[CardData] = []
 var discard_pile: Array[CardData] = []
@@ -86,6 +106,8 @@ var prevent_next_fracture_damage: bool = false
 
 ## 待选择请求。非 null 时战斗被挂起，只接受解析或取消两种输入。
 var pending_selection: PendingSelection = null
+## 结束回合时的手牌快照。敌人意图可编辑这些已进入弃牌堆的同一战斗实例。
+var _ended_hand_snapshot: Array[CardData] = []
 
 # --- 单张卡牌结算过程中的临时状态（供挂起后继续结算使用） ---
 var _play_card: CardData = null
@@ -128,6 +150,7 @@ func start_battle(
 	last_nonstatus_card_type = -1
 	extra_draws_this_turn = 0
 	binding_triggered_this_turn = false
+	_reset_boss_state()
 	turn_number = 1
 	battle_over = false
 	victory = false
@@ -141,6 +164,7 @@ func start_battle(
 	last_card_exhausts = false
 	last_card_temporary = false
 	pending_selection = null
+	_ended_hand_snapshot.clear()
 	_clear_play_state()
 	missing_name.clear()
 	draw_pile.clear()
@@ -201,7 +225,7 @@ func build_target_context() -> TargetContext:
 	context.draw_pile = draw_pile
 	for index: int in range(get_enemy_count()):
 		context.enemy_names.append(get_enemy_name(index))
-		context.enemy_hps.append(get_enemy_hp(index))
+		context.enemy_hps.append(0 if boss_terminal_choice_pending else get_enemy_hp(index))
 	return context
 
 
@@ -241,11 +265,12 @@ func get_next_tutorial_stage() -> int:
 # ---------------------------------------------------------------------- 出牌流程
 
 func play_card(hand_index: int) -> bool:
-	if battle_over or pending_selection != null:
+	if battle_over or boss_terminal_choice_pending or pending_selection != null:
 		return false
 	if hand_index < 0 or hand_index >= hand.size():
 		return false
 	var card: CardData = hand[hand_index]
+	var effective_type: int = get_card_effective_type(card)
 	if card.card_type == CardData.CardType.STATUS and card.base_cost >= 99:
 		_log("《%s》不可打出。" % card.title)
 		return false
@@ -257,15 +282,17 @@ func play_card(hand_index: int) -> bool:
 	energy -= cost
 	_play_paid_cost = cost
 	_play_missing_name_refund_type = -1
-	if int(missing_name.get(card.card_type, 0)) > 0:
-		_play_missing_name_refund_type = card.card_type
-	_consume_missing_name(card.card_type)
+	if effective_type >= 0 and int(missing_name.get(effective_type, 0)) > 0:
+		_play_missing_name_refund_type = effective_type
+		_consume_missing_name(effective_type)
 	hand.remove_at(hand_index)
-	_log("打出《%s》[%s]，消耗 %d 稳定度。" % [card.title, card.type_name(), cost])
+	_log("打出《%s》[%s]，消耗 %d 稳定度。" % [card.title, get_card_type_display(card), cost])
 
 	_play_card = card
 	_play_hand_index = hand_index
-	_play_effects = _generate_card_effects(card)
+	_play_effects = _filter_deleted_keyword_effects(card, _generate_card_effects(card))
+	if _play_effects.is_empty() and not get_card_keywords(card).is_empty():
+		_log("《%s》的关键词已删除；基础正文为空。" % card.title)
 	_play_effect_index = 0
 	_play_resolved_damage = 0
 	_play_resolved_block = 0
@@ -377,7 +404,9 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 	match effect.kind:
 		CardEffect.Kind.DAMAGE_ENEMY:
 			var target: int = TargetSelector.resolve_enemy(effect.target_kind, build_target_context())
-			_play_resolved_damage += _deal_damage_to_enemy(effect.amount, card.card_type, card.title, target)
+			_play_resolved_damage += _deal_damage_to_enemy(
+				effect.amount, get_card_effective_type(card), card.title, target
+			)
 		CardEffect.Kind.GAIN_BLOCK:
 			_play_resolved_block += _gain_player_block(effect.amount, card.title)
 		CardEffect.Kind.DRAW_CARDS:
@@ -405,8 +434,9 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 					TargetSelector.Kind.LOWEST_HP_ENEMY, build_target_context()
 				)
 				_play_resolved_damage += _deal_damage_to_enemy(
-					echoed_damage, card.card_type, card.title, echo_target
+					echoed_damage, get_card_effective_type(card), card.title, echo_target
 				)
+				_on_boss_echo_resolved()
 			else:
 				_log("回响失败：紧邻上一张牌不是攻式。")
 		CardEffect.Kind.ECHO_BLOCK:
@@ -414,6 +444,7 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 				var echoed_block: int = floori(float(last_block_snapshot) * float(effect.amount) / 100.0)
 				_play_resolved_block += _gain_player_block(echoed_block, card.title, false)
 				_log("回响上一张守式已结算格挡的 %d%%：%d。" % [effect.amount, echoed_block])
+				_on_boss_echo_resolved()
 			else:
 				_log("回响失败：紧邻上一张牌不是守式。")
 		CardEffect.Kind.PREVENT_FRACTURE:
@@ -425,7 +456,7 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 				effect.target_kind, build_target_context()
 			)
 			_play_resolved_damage += _deal_damage_to_enemy(
-				dissolution_damage, card.card_type, card.title, dissolution_target
+				dissolution_damage, get_card_effective_type(card), card.title, dissolution_target
 			)
 			instability = 0
 			_log("崩解协议将不稳定清零。")
@@ -464,21 +495,23 @@ func _finish_card_play() -> void:
 	if card == null:
 		return
 	if not _play_card_was_sealed:
-		if card.exhausts:
+		if card.exhausts and is_card_keyword_active(card, &"消逝"):
 			exhausted_zone.append(card)
 			_log("《%s》进入消逝区。" % card.title)
 		else:
 			discard_pile.append(card)
 
+	var effective_type: int = get_card_effective_type(card)
 	cards_played_this_turn += 1
 	_telemetry_card_uses[card.id] = int(_telemetry_card_uses.get(card.id, 0)) + 1
-	if card.card_type == CardData.CardType.ATTACK:
+	if effective_type == CardData.CardType.ATTACK:
 		attack_played_this_turn = true
-	if card.card_type != CardData.CardType.STATUS:
-		_apply_same_type_adaptation(card.card_type)
-		reverse_record_pending = card.card_type
-		last_nonstatus_card_type = card.card_type
-	last_card_type = card.card_type
+	if effective_type >= 0 and effective_type != CardData.CardType.STATUS:
+		_apply_same_type_adaptation(effective_type)
+		reverse_record_pending = effective_type
+		last_nonstatus_card_type = effective_type
+		_track_boss_type_sequence(effective_type)
+	last_card_type = effective_type
 	last_card_id = card.id
 	last_card_upgrade_id = card.upgrade_id
 	last_card_base_cost = card.base_cost
@@ -486,12 +519,14 @@ func _finish_card_play() -> void:
 	last_card_temporary = card.temporary
 	last_damage_snapshot = _play_resolved_damage
 	last_block_snapshot = _play_resolved_block
-	var bookplate_draw: int = rule_engine.consume_bookplate_draw(card.card_type)
-	if bookplate_draw > 0 and not battle_over:
+	var bookplate_draw: int = rule_engine.consume_bookplate_draw(effective_type)
+	if bookplate_draw > 0 and not battle_over and not boss_terminal_choice_pending:
 		_log("无字藏书票触发：本场战斗第一次打出律式，抽 %d 张牌。" % bookplate_draw)
 		draw_cards(bookplate_draw, false)
 	_clear_play_state()
-	if not battle_over:
+	if boss_transition_pending:
+		_apply_boss_phase_transition()
+	if not battle_over and not boss_terminal_choice_pending:
 		_check_fracture()
 
 
@@ -508,9 +543,10 @@ func _clear_play_state() -> void:
 
 
 func end_player_turn() -> void:
-	if battle_over or pending_selection != null:
+	if battle_over or boss_terminal_choice_pending or pending_selection != null:
 		return
 	_log("结束第 %d 回合：弃置 %d 张手牌。" % [turn_number, hand.size()])
+	_ended_hand_snapshot = hand.duplicate()
 	while not hand.is_empty():
 		discard_pile.append(hand.pop_back())
 	_check_fracture()
@@ -548,13 +584,84 @@ func draw_cards(amount: int, is_base_draw: bool = false) -> void:
 			exhausted_zone.append(card)
 			_log("抽到《删节》：获得 1 层律式缺名；《删节》进入消逝区。")
 			continue
+		if boss_delete_next_draw_type and card.card_type != CardData.CardType.STATUS:
+			_delete_boss_card_type(card)
+			boss_delete_next_draw_type = false
 		hand.append(card)
 		_log("抽到《%s》。" % card.title)
 
 
 func get_card_cost(card: CardData) -> int:
 	var base: int = card.cost_override_this_turn if card.cost_override_this_turn >= 0 else card.base_cost
-	return rule_engine.compute_cost(base, int(missing_name.get(card.card_type, 0)))
+	var effective_type: int = get_card_effective_type(card)
+	var missing_stacks: int = 0 if effective_type < 0 else int(missing_name.get(effective_type, 0))
+	var edit: Dictionary = boss_cost_edits.get(card.instance_id, {})
+	return rule_engine.compute_cost(base + int(edit.get(&"increase", 0)), missing_stacks)
+
+
+func get_card_original_cost(card: CardData) -> int:
+	var base: int = card.cost_override_this_turn if card.cost_override_this_turn >= 0 else card.base_cost
+	var effective_type: int = get_card_effective_type(card)
+	var missing_stacks: int = 0 if effective_type < 0 else int(missing_name.get(effective_type, 0))
+	return rule_engine.compute_cost(base, missing_stacks)
+
+
+func get_card_cost_display(card: CardData) -> String:
+	var current: int = get_card_cost(card)
+	var edit: Dictionary = boss_cost_edits.get(card.instance_id, {})
+	if edit.is_empty():
+		return "费用 %d" % current
+	return "费用 %d（原%d，红笔+%d）" % [current, get_card_original_cost(card), int(edit[&"increase"])]
+
+
+func get_card_effective_type(card: CardData) -> int:
+	return -1 if boss_deleted_types.has(card.instance_id) else card.card_type
+
+
+func get_card_type_display(card: CardData) -> String:
+	if boss_deleted_types.has(card.instance_id):
+		return "类别：已删除（原%s）" % CardData.type_display_name(card.card_type)
+	return "类别：%s" % card.type_name()
+
+
+func get_card_keywords(card: CardData) -> Array[StringName]:
+	var keywords: Array[StringName] = []
+	match card.id:
+		&"boundary_read", &"rift_slash", &"unseal_order", &"homophone":
+			keywords.append(&"超载")
+	match card.id:
+		&"delayed_guard", &"countdown_scar", &"prewritten_ending":
+			keywords.append(&"封存")
+	match card.id:
+		&"restate", &"copied_guard":
+			keywords.append(&"回响")
+	if card.exhausts:
+		keywords.append(&"消逝")
+	return keywords
+
+
+func is_card_keyword_active(card: CardData, keyword: StringName) -> bool:
+	var edit: Dictionary = boss_deleted_keywords.get(card.instance_id, {})
+	var deleted: Array = edit.get(&"keywords", [])
+	return not deleted.has(keyword)
+
+
+func get_card_keyword_display(card: CardData) -> String:
+	var parts: Array[String] = []
+	for keyword: StringName in get_card_keywords(card):
+		parts.append("%s（已删除）" % keyword if not is_card_keyword_active(card, keyword) else str(keyword))
+	return "关键词：无" if parts.is_empty() else "关键词：%s" % "、".join(parts)
+
+
+func get_card_boss_edit_text(card: CardData) -> String:
+	var parts: Array[String] = []
+	if boss_cost_edits.has(card.instance_id):
+		parts.append("连续三种不同类别：恢复费用")
+	if boss_deleted_types.has(card.instance_id):
+		parts.append("封存牌解封：恢复类别")
+	if boss_deleted_keywords.has(card.instance_id):
+		parts.append("触发裂解：恢复关键词")
+	return "" if parts.is_empty() else "恢复：%s" % "；".join(parts)
 
 
 # ------------------------------------------------------------------ 意图与展示
@@ -564,6 +671,7 @@ func build_intent_context(use_current_hand: bool = true) -> IntentContext:
 	context.devour_record_type = devour_record_type
 	context.reverse_record_type = reverse_record_type
 	context.stone_shell_broken = stone_shell_broken_this_turn
+	context.player_has_missing_name = _missing_name_total() > 0
 	if use_current_hand:
 		for card: CardData in hand:
 			if card.card_type == CardData.CardType.STATUS:
@@ -575,7 +683,7 @@ func build_intent_context(use_current_hand: bool = true) -> IntentContext:
 func get_current_intent() -> EnemyIntent:
 	if enemy_definition == null:
 		return null
-	return enemy_definition.select_intent(enemy_intent_index, reverse_record_type)
+	return enemy_definition.select_intent(enemy_intent_index, reverse_record_type, boss_phase)
 
 
 func get_enemy_intent_text() -> String:
@@ -586,6 +694,8 @@ func get_enemy_intent_text() -> String:
 
 
 func get_enemy_record_text() -> String:
+	if is_name_eraser_battle():
+		return get_boss_status_text()
 	if enemy_definition != null and enemy_definition.has_trait(EnemyDefinition.TRAIT_REVERSE_READ):
 		if reverse_record_type < 0:
 			return "倒读记录：空白"
@@ -610,6 +720,325 @@ func get_missing_name_text() -> String:
 	if parts.is_empty():
 		return "无"
 	return "、".join(parts)
+
+
+func is_name_eraser_battle() -> bool:
+	return enemy_definition != null and enemy_definition.has_trait(EnemyDefinition.TRAIT_NAME_ERASER)
+
+
+func get_boss_phase_name() -> String:
+	match boss_phase:
+		1:
+			return "校对"
+		2:
+			return "除名"
+		3:
+			return "终结"
+	return "未启用"
+
+
+func get_boss_deleted_summary() -> String:
+	var parts: Array[String] = []
+	if not boss_cost_edits.is_empty():
+		parts.append("费用×%d" % boss_cost_edits.size())
+	if not boss_deleted_types.is_empty():
+		parts.append("类别×%d" % boss_deleted_types.size())
+	if not boss_deleted_keywords.is_empty():
+		parts.append("关键词×%d" % boss_deleted_keywords.size())
+	if boss_delete_next_draw_type:
+		parts.append("待删除下次抽牌类别")
+	return "无" if parts.is_empty() else "、".join(parts)
+
+
+func get_boss_status_text() -> String:
+	var text: String = "REC-10 / 可覆写载体｜阶段%d·%s｜力量%d｜恢复%d｜删除：%s\n除名栏：%s" % [
+		boss_phase, get_boss_phase_name(), boss_strength, boss_recovery_count,
+		get_boss_deleted_summary(), get_boss_deleted_detail_text(),
+	]
+	if not boss_last_recovery_text.is_empty():
+		text += "\n最近恢复：%s" % boss_last_recovery_text
+	return text
+
+
+func can_choose_boss_original_text() -> bool:
+	return boss_terminal_choice_pending and boss_recovery_count >= BOSS_RECOVERY_REQUIRED
+
+
+func get_boss_terminal_options() -> Array[Dictionary]:
+	return [
+		{&"id": &"deliver_seal", &"label": "交付定义律印", &"enabled": boss_terminal_choice_pending, &"reason": ""},
+		{
+			&"id": &"read_original", &"label": "读取被删原文",
+			&"enabled": can_choose_boss_original_text(),
+			&"reason": "" if can_choose_boss_original_text() else "需要本场战斗完成至少 2 次恢复（当前 %d/%d）" % [boss_recovery_count, BOSS_RECOVERY_REQUIRED],
+		},
+	]
+
+
+func choose_boss_terminal(option_id: StringName) -> bool:
+	if not boss_terminal_choice_pending:
+		return false
+	var enabled: bool = false
+	for option: Dictionary in get_boss_terminal_options():
+		if option[&"id"] == option_id:
+			enabled = bool(option[&"enabled"])
+			break
+	if not enabled:
+		_log("终结选项不可用：%s。" % option_id)
+		return false
+	boss_terminal_choice = option_id
+	boss_terminal_choice_pending = false
+	battle_over = true
+	victory = true
+	if option_id == &"read_original":
+		boss_terminal_result_text = "你读取了被删原文：第十份校准记录仍保留着九种互相冲突的文明答案。"
+	else:
+		boss_terminal_result_text = "你按终末机构命令交付定义律印。REC-10 档案重新封闭。"
+	_log(boss_terminal_result_text)
+	return true
+
+
+func get_boss_deleted_detail_text() -> String:
+	var parts: Array[String] = []
+	for raw_id: Variant in boss_cost_edits.keys():
+		var cost_card: CardData = _card_for_instance(int(raw_id))
+		if cost_card != null:
+			parts.append("《%s》费用+%d" % [cost_card.title, int((boss_cost_edits[raw_id] as Dictionary)[&"increase"])])
+	for raw_id: Variant in boss_deleted_types.keys():
+		var type_card: CardData = _card_for_instance(int(raw_id))
+		if type_card != null:
+			parts.append("《%s》类别已删除（原%s）" % [type_card.title, CardData.type_display_name(type_card.card_type)])
+	for raw_id: Variant in boss_deleted_keywords.keys():
+		var keyword_card: CardData = _card_for_instance(int(raw_id))
+		if keyword_card == null:
+			continue
+		var keyword_names: Array[String] = []
+		for raw_keyword: Variant in (boss_deleted_keywords[raw_id] as Dictionary)[&"keywords"]:
+			keyword_names.append(str(raw_keyword))
+		parts.append("《%s》关键词已删除（%s）" % [keyword_card.title, "、".join(keyword_names)])
+	if boss_delete_next_draw_type:
+		parts.append("下次抽到的第一张非状态牌将失去类别")
+	return "无" if parts.is_empty() else "；".join(parts)
+
+
+func _reset_boss_state() -> void:
+	boss_phase = 0
+	boss_transition_pending = false
+	boss_terminal_choice_pending = false
+	boss_recovery_count = 0
+	boss_strength = 0
+	boss_cost_edits.clear()
+	boss_deleted_types.clear()
+	boss_deleted_keywords.clear()
+	boss_type_sequence.clear()
+	boss_last_recovery_text = ""
+	boss_delete_next_draw_type = false
+	boss_terminal_choice = &""
+	boss_terminal_result_text = ""
+	_boss_edit_order = 0
+
+
+func _next_boss_edit_order() -> int:
+	_boss_edit_order += 1
+	return _boss_edit_order
+
+
+func _edit_boss_card_costs(amount: int) -> void:
+	var candidates: Array[CardData] = []
+	for pile: Array[CardData] in [draw_pile, discard_pile]:
+		for card: CardData in pile:
+			if card.card_type != CardData.CardType.STATUS and not boss_cost_edits.has(card.instance_id):
+				candidates.append(card)
+	var edit_count: int = mini(amount, candidates.size())
+	for edit_index: int in range(edit_count):
+		var chosen_index: int = rng.randi_range(0, candidates.size() - 1)
+		var chosen: CardData = candidates[chosen_index]
+		candidates.remove_at(chosen_index)
+		boss_cost_edits[chosen.instance_id] = {
+			&"original_cost": get_card_original_cost(chosen),
+			&"increase": 1,
+			&"order": _next_boss_edit_order(),
+			&"source": &"tamper_cost",
+		}
+		_log("篡改费用：《%s》费用由 %d 改为 %d；连续打出三种不同正式类别可恢复。" % [
+			chosen.title, get_card_original_cost(chosen), get_card_cost(chosen),
+		])
+	if edit_count < amount:
+		_log("篡改费用只找到 %d 个可编辑实例。" % edit_count)
+
+
+func _delete_boss_card_type(card: CardData) -> bool:
+	if not is_name_eraser_battle() or boss_phase != 2 or card.card_type == CardData.CardType.STATUS:
+		return false
+	if boss_deleted_types.has(card.instance_id):
+		_log("《%s》的类别已经被删除，本次标记没有重复叠加。" % card.title)
+		return false
+	boss_deleted_types[card.instance_id] = {
+		&"original_type": card.card_type,
+		&"order": _next_boss_edit_order(),
+		&"source": &"delete_type",
+	}
+	_log("删除类别：《%s》进入手牌时失去%s；封存牌解封可恢复最早一项。" % [
+		card.title, CardData.type_display_name(card.card_type),
+	])
+	return true
+
+
+func _delete_boss_hand_keywords() -> void:
+	var candidates: Array[CardData] = []
+	for card: CardData in _ended_hand_snapshot:
+		if not get_card_keywords(card).is_empty() and not boss_deleted_keywords.has(card.instance_id):
+			candidates.append(card)
+	if candidates.is_empty():
+		_log("删除关键词失败：手牌中没有尚未删除关键词的卡牌。")
+		return
+	var card: CardData = candidates[rng.randi_range(0, candidates.size() - 1)]
+	var keywords: Array[StringName] = get_card_keywords(card)
+	boss_deleted_keywords[card.instance_id] = {
+		&"keywords": keywords.duplicate(),
+		&"order": _next_boss_edit_order(),
+		&"source": &"delete_keywords",
+	}
+	var names: Array[String] = []
+	for keyword: StringName in keywords:
+		names.append(str(keyword))
+	_log("删除关键词：《%s》的%s附加效果被禁用；触发裂解可恢复最早一项。" % [
+		card.title, "、".join(names),
+	])
+
+
+func _clear_missing_name_gain_boss_strength() -> void:
+	var cleared: int = _missing_name_total()
+	missing_name.clear()
+	if cleared <= 0:
+		_log("返还原稿：当前没有缺名可清除，删名者未获得力量。")
+		return
+	boss_strength += cleared * 3
+	rule_engine.enemy_strength = boss_strength
+	_log("返还原稿：清除 %d 层缺名；删名者力量升至 %d。" % [cleared, boss_strength])
+
+
+func _missing_name_total() -> int:
+	var total: int = 0
+	for raw_stacks: Variant in missing_name.values():
+		total += maxi(0, int(raw_stacks))
+	return total
+
+
+func _track_boss_type_sequence(card_type: int) -> void:
+	if not is_name_eraser_battle() or boss_phase != 1:
+		return
+	if not [CardData.CardType.ATTACK, CardData.CardType.DEFENSE, CardData.CardType.LAW].has(card_type):
+		return
+	if boss_type_sequence.has(card_type):
+		boss_type_sequence = [card_type]
+	else:
+		boss_type_sequence.append(card_type)
+	if boss_type_sequence.size() < 3:
+		return
+	boss_type_sequence.clear()
+	if not _restore_earliest_boss_cost_edit():
+		_log("三种不同类别已连续完成，但当前没有费用篡改可恢复。")
+
+
+func _restore_earliest_boss_cost_edit() -> bool:
+	var instance_id: int = _earliest_boss_edit_id(boss_cost_edits)
+	if instance_id < 0:
+		return false
+	var card: CardData = _card_for_instance(instance_id)
+	boss_cost_edits.erase(instance_id)
+	var removed_block: int = mini(6, enemy_block)
+	enemy_block -= removed_block
+	var card_name: String = "实例#%d" % instance_id if card == null else "《%s》" % card.title
+	_record_boss_recovery("%s恢复原费用；删名者失去 %d 格挡。" % [card_name, removed_block])
+	return true
+
+
+func _restore_earliest_boss_type_edit() -> bool:
+	if not is_name_eraser_battle() or boss_phase != 2:
+		return false
+	var instance_id: int = _earliest_boss_edit_id(boss_deleted_types)
+	if instance_id < 0:
+		return false
+	var card: CardData = _card_for_instance(instance_id)
+	boss_deleted_types.erase(instance_id)
+	var card_name: String = "实例#%d" % instance_id if card == null else "《%s》" % card.title
+	_record_boss_recovery("%s恢复原类别。" % card_name)
+	return true
+
+
+func _restore_earliest_boss_keyword_edit() -> bool:
+	if not is_name_eraser_battle() or boss_phase != 2:
+		return false
+	var instance_id: int = _earliest_boss_edit_id(boss_deleted_keywords)
+	if instance_id < 0:
+		return false
+	var card: CardData = _card_for_instance(instance_id)
+	boss_deleted_keywords.erase(instance_id)
+	var card_name: String = "实例#%d" % instance_id if card == null else "《%s》" % card.title
+	_record_boss_recovery("%s恢复被删关键词。" % card_name)
+	return true
+
+
+func _on_boss_echo_resolved() -> void:
+	if not is_name_eraser_battle() or boss_phase != 2 or boss_strength <= 0:
+		return
+	boss_strength -= 1
+	rule_engine.enemy_strength = boss_strength
+	boss_last_recovery_text = "回响成功：删名者力量降至 %d。" % boss_strength
+	_log(boss_last_recovery_text)
+
+
+func _record_boss_recovery(message: String) -> void:
+	boss_recovery_count += 1
+	boss_last_recovery_text = message
+	_log("恢复记录 %d：%s" % [boss_recovery_count, message])
+
+
+func _earliest_boss_edit_id(edits: Dictionary) -> int:
+	var earliest_id: int = -1
+	var earliest_order: int = 2_147_483_647
+	for raw_id: Variant in edits.keys():
+		var entry: Dictionary = edits[raw_id] as Dictionary
+		var order: int = int(entry.get(&"order", earliest_order))
+		if order < earliest_order:
+			earliest_order = order
+			earliest_id = int(raw_id)
+	return earliest_id
+
+
+func _card_for_instance(instance_id: int) -> CardData:
+	for pile: Array[CardData] in [draw_pile, hand, discard_pile, sealed_zone, exhausted_zone]:
+		for card: CardData in pile:
+			if card.instance_id == instance_id:
+				return card
+	return null
+
+
+func _apply_boss_phase_transition() -> void:
+	if not is_name_eraser_battle() or boss_phase != 1 or boss_terminal_choice_pending:
+		boss_transition_pending = false
+		return
+	boss_transition_pending = false
+	boss_phase = 2
+	enemy_intent_index = 0
+	enemy_block = 0
+	boss_cost_edits.clear()
+	boss_type_sequence.clear()
+	_log("阶段转换：全部格挡与费用篡改已清除。REC-10 / 可覆写载体。")
+	_log("删名者：我删掉的不是你的名字。我删掉的是他们给你的用途。")
+
+
+func _enter_boss_terminal() -> void:
+	if not is_name_eraser_battle() or boss_terminal_choice_pending or battle_over:
+		return
+	boss_phase = 3
+	boss_transition_pending = false
+	boss_terminal_choice_pending = true
+	enemy_hp = BOSS_TERMINAL_HP
+	enemy_block = 0
+	_log("终结阶段：删名者生命锁定为 1，并从伤害目标中移除。")
+	_log("未完成的删除等待你的选择。")
 
 
 func get_sealed_summary() -> String:
@@ -639,6 +1068,7 @@ func get_telemetry() -> Dictionary:
 # ---------------------------------------------------------------------- 回合流程
 
 func _start_player_turn() -> void:
+	_ended_hand_snapshot.clear()
 	player_block = 0
 	energy = BASE_ENERGY
 	instability_gained_this_turn = false
@@ -668,7 +1098,7 @@ func _start_player_turn() -> void:
 		_log(message)
 	_log("—— 第 %d 回合：格挡清零，稳定度恢复至 %d ——" % [turn_number, energy])
 	_resolve_sealed_cards()
-	if battle_over:
+	if battle_over or boss_terminal_choice_pending:
 		return
 	var cards_needed: int = maxi(0, BASE_HAND_SIZE - hand.size())
 	draw_cards(cards_needed, true)
@@ -683,7 +1113,7 @@ func _resolve_sealed_cards() -> void:
 			index += 1
 			continue
 		_unseal_card_at(index)
-		if battle_over:
+		if battle_over or boss_terminal_choice_pending:
 			return
 
 
@@ -692,6 +1122,7 @@ func _unseal_card_at(index: int) -> void:
 	sealed_zone.remove_at(index)
 	card_unsealed_this_turn = true
 	_log("《%s》解封。" % card.title)
+	_restore_earliest_boss_type_edit()
 	match card.id:
 		&"delayed_guard":
 			var gained: int = _gain_player_block(card.value(&"unseal_block", 12), card.title, false)
@@ -707,6 +1138,8 @@ func _unseal_card_at(index: int) -> void:
 	else:
 		discard_pile.append(card)
 		_log("手牌已满，《%s》进入弃牌堆。" % card.title)
+	if boss_transition_pending:
+		_apply_boss_phase_transition()
 
 
 func _generate_card_effects(card: CardData) -> Array[CardEffect]:
@@ -785,6 +1218,26 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 	return effects
 
 
+func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect]) -> Array[CardEffect]:
+	if not boss_deleted_keywords.has(card.instance_id):
+		return effects
+	var filtered: Array[CardEffect] = []
+	for effect: CardEffect in effects:
+		var keyword: StringName = &""
+		match effect.kind:
+			CardEffect.Kind.GAIN_INSTABILITY:
+				keyword = &"超载"
+			CardEffect.Kind.SEAL_CARD, CardEffect.Kind.PREWRITE_COPY:
+				keyword = &"封存"
+			CardEffect.Kind.ECHO_ATTACK, CardEffect.Kind.ECHO_BLOCK:
+				keyword = &"回响"
+		if keyword != &"" and not is_card_keyword_active(card, keyword):
+			_log("《%s》的关键词“%s”已删除，附加效果不结算。" % [card.title, keyword])
+			continue
+		filtered.append(effect)
+	return filtered
+
+
 # ------------------------------------------------------------------ 数值结算
 
 func _gain_player_block(amount: int, source_name: String, write_log: bool = true) -> int:
@@ -806,7 +1259,7 @@ func _gain_instability(amount: int) -> void:
 
 
 func _deal_damage_to_enemy(base_amount: int, source_type: int, source_name: String, target_index: int) -> int:
-	if base_amount <= 0 or battle_over:
+	if base_amount <= 0 or battle_over or boss_terminal_choice_pending:
 		return 0
 	if target_index == TargetSelector.NO_TARGET:
 		_log("《%s》没有可攻击的目标。" % source_name)
@@ -826,12 +1279,18 @@ func _deal_damage_to_enemy(base_amount: int, source_type: int, source_name: Stri
 	if blocked_by_shell > 0 and stone_shell == 0:
 		stone_shell_broken_this_turn = true
 		_log("%s的石壳被击碎。" % enemy_name)
-	enemy_hp = maxi(0, enemy_hp - remaining)
+	var hp_floor: int = BOSS_TERMINAL_HP if is_name_eraser_battle() else 0
+	enemy_hp = maxi(hp_floor, enemy_hp - remaining)
 	_log("《%s》造成 %d 伤害（格挡抵消 %d），%s生命 %d/%d。" % [
 		source_name, remaining, blocked_by_intent + blocked_by_shell,
 		enemy_name, enemy_hp, enemy_max_hp,
 	])
-	if enemy_hp <= 0:
+	if is_name_eraser_battle():
+		if boss_phase == 1 and enemy_hp <= BOSS_PHASE_TWO_THRESHOLD:
+			boss_transition_pending = true
+		if enemy_hp <= BOSS_TERMINAL_HP:
+			_enter_boss_terminal()
+	elif enemy_hp <= 0:
 		battle_over = true
 		victory = true
 		_log("战斗胜利：穿过路径节点 %d/%d。" % [tutorial_stage, TUTORIAL_STAGE_MAX])
@@ -856,7 +1315,7 @@ func _record_devour(source_type: int) -> void:
 		return
 	if not is_mechanic_unlocked(&"missing_name") or devour_record_type >= 0:
 		return
-	if source_type == CardData.CardType.STATUS:
+	if source_type < 0 or source_type == CardData.CardType.STATUS:
 		return
 	devour_record_type = source_type
 	_log("%s吞下%s符号。" % [enemy_name, CardData.type_display_name(source_type)])
@@ -918,7 +1377,7 @@ func _execute_enemy_intent() -> void:
 	if enemy_definition == null:
 		return
 	enemy_block = 0
-	var intent: EnemyIntent = enemy_definition.select_intent(enemy_intent_index, reverse_record_type)
+	var intent: EnemyIntent = enemy_definition.select_intent(enemy_intent_index, reverse_record_type, boss_phase)
 	if intent == null:
 		return
 	var context: IntentContext = build_intent_context(false)
@@ -929,7 +1388,9 @@ func _execute_enemy_intent() -> void:
 		_apply_enemy_operation(operation, context)
 		if battle_over:
 			return
-	enemy_intent_index = (enemy_intent_index + 1) % maxi(1, enemy_definition.intent_count())
+	enemy_intent_index = (enemy_intent_index + 1) % maxi(
+		1, enemy_definition.intent_count_for_phase(boss_phase)
+	)
 
 
 func _apply_enemy_operation(operation: EnemyOperation, context: IntentContext) -> void:
@@ -993,10 +1454,19 @@ func _apply_enemy_operation(operation: EnemyOperation, context: IntentContext) -
 				enemy_definition.stone_shell_initial, stone_shell + operation.amount
 			)
 			_log_if(message)
+		EnemyOperation.Kind.EDIT_CARD_COSTS:
+			_edit_boss_card_costs(operation.amount)
+		EnemyOperation.Kind.MARK_NEXT_DRAW_TYPE_DELETION:
+			boss_delete_next_draw_type = true
+			_log("删除类别已标记：下次抽到的第一张非状态牌进入手牌时失去类别；封存牌解封可恢复。")
+		EnemyOperation.Kind.DELETE_HAND_KEYWORDS:
+			_delete_boss_hand_keywords()
+		EnemyOperation.Kind.CLEAR_MISSING_NAME_GAIN_STRENGTH:
+			_clear_missing_name_gain_boss_strength()
 
 
 func _discard_contains_status_from_this_turn() -> bool:
-	for card: CardData in discard_pile:
+	for card: CardData in _ended_hand_snapshot:
 		if card.card_type == CardData.CardType.STATUS:
 			return true
 	return false
@@ -1016,6 +1486,7 @@ func _check_fracture() -> void:
 	_log("裂解触发：受到 %d 点不可格挡伤害，不稳定降至 %d，生命 %d/%d。" % [
 		damage, instability, player_hp, player_max_hp,
 	])
+	_restore_earliest_boss_keyword_edit()
 	_check_player_defeat()
 
 
@@ -1069,7 +1540,10 @@ func _configure_enemy(p_enemy_id: StringName) -> void:
 	else:
 		enemy_max_hp = enemy_definition.hp_min
 	enemy_hp = enemy_max_hp
-	if not enemy_definition.intro_line.is_empty() and enemy_definition.tier != "训练":
+	if enemy_definition.has_trait(EnemyDefinition.TRAIT_NAME_ERASER):
+		boss_phase = 1
+		tutorial_hint = enemy_definition.intro_line
+	elif not enemy_definition.intro_line.is_empty() and enemy_definition.tier != "训练":
 		tutorial_hint = enemy_definition.intro_line if tutorial_hint.is_empty() else tutorial_hint
 
 

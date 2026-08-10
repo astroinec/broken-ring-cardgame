@@ -21,6 +21,10 @@ enum Kind {
 	CLEANSE_SELF,
 	SELF_DAMAGE,
 	RESTORE_STONE_SHELL,
+	EDIT_CARD_COSTS,
+	MARK_NEXT_DRAW_TYPE_DELETION,
+	DELETE_HAND_KEYWORDS,
+	CLEAR_MISSING_NAME_GAIN_STRENGTH,
 }
 
 enum Condition {
@@ -30,6 +34,8 @@ enum Condition {
 	STONE_SHELL_INTACT,
 	STONE_SHELL_BROKEN,
 	PLAYER_HAND_HAS_STATUS,
+	PLAYER_HAS_MISSING_NAME,
+	PLAYER_HAS_NO_MISSING_NAME,
 }
 
 const TYPE_PLACEHOLDER: String = "{type}"
@@ -75,6 +81,10 @@ func is_active(context: IntentContext) -> bool:
 			return context.stone_shell_broken
 		Condition.PLAYER_HAND_HAS_STATUS:
 			return context.player_hand_has_status
+		Condition.PLAYER_HAS_MISSING_NAME:
+			return context.player_has_missing_name
+		Condition.PLAYER_HAS_NO_MISSING_NAME:
+			return not context.player_has_missing_name
 	return true
 
 
@@ -105,5 +115,7 @@ func is_valid() -> bool:
 		Kind.APPLY_MISSING_NAME_RECORDED, Kind.APPLY_VULNERABLE, Kind.APPLY_WEAK:
 			return amount > 0
 		Kind.RESTORE_STONE_SHELL:
+			return amount > 0
+		Kind.EDIT_CARD_COSTS, Kind.DELETE_HAND_KEYWORDS:
 			return amount > 0
 	return true

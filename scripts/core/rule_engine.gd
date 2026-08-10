@@ -91,6 +91,7 @@ var player_strength: int = 0
 var player_weak_turns: int = 0
 var player_vulnerable_turns: int = 0
 var enemy_vulnerable_turns: int = 0
+var enemy_strength: int = 0
 var enemy_next_attack_bonus: int = 0
 
 var relics: Array[StringName] = []
@@ -110,6 +111,7 @@ func reset_for_battle(p_relics: Array[StringName]) -> void:
 	player_weak_turns = 0
 	player_vulnerable_turns = 0
 	enemy_vulnerable_turns = 0
+	enemy_strength = 0
 	enemy_next_attack_bonus = 0
 	crack_stabilizer_used = false
 	bookplate_used = false
@@ -165,10 +167,13 @@ func compute_damage_to_player(base: int, is_attack: bool) -> int:
 	last_trace.clear()
 	var value: float = float(base)
 	_trace(Phase.BASE, "基础伤害 %d" % base)
+	if is_attack and enemy_strength != 0:
+		value += float(enemy_strength)
+		_trace(Phase.ATTACKER, "敌方力量 %+d → %d" % [enemy_strength, int(value)])
 	if is_attack and enemy_next_attack_bonus > 0:
 		value += float(enemy_next_attack_bonus)
 		_trace(Phase.ATTACKER, "敌方蓄力 %+d → %d" % [enemy_next_attack_bonus, int(value)])
-	else:
+	if not is_attack or (enemy_strength == 0 and enemy_next_attack_bonus <= 0):
 		_trace(Phase.ATTACKER, "无攻击方加成")
 	if is_attack and player_vulnerable_turns > 0:
 		value = floor(value * VULNERABLE_MULTIPLIER)

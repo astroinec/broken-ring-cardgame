@@ -68,10 +68,22 @@ func _run() -> void:
 	_check_current_page("event", true, true)
 	_expect(_find_named(main.screen_root, "EventContent") != null, "event story and options use scrollable content")
 
-	main._show_boss_placeholder()
+	main.model = CombatModel.new()
+	var no_bonus: Array[StringName] = []
+	var no_relics: Array[StringName] = []
+	main.model.start_battle(73103, 6, no_bonus, &"name_eraser", no_relics)
+	main.model.boss_phase = 2
+	main.model.boss_recovery_count = 2
+	main.model._enter_boss_terminal()
+	main._show_boss_terminal_screen()
 	await process_frame
-	_check_current_page("boss placeholder", false, false)
+	_check_current_page("boss terminal", true, true)
+	_expect(_find_named(main.screen_root, "BossTerminalContent") != null, "Boss terminal options use scrollable content")
+	_expect(_find_button_with_text(main.screen_root, "读取被删原文") != null, "Boss terminal keeps the hidden option visible")
 
+	main.run_model.boss_ending_id = &"read_original"
+	main.run_model.boss_ending_text = "测试结算文本。"
+	main.run_model.run_completed = true
 	main._show_expedition_complete_screen()
 	await process_frame
 	_check_current_page("expedition complete", true, true)

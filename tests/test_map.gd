@@ -29,7 +29,7 @@ func _test_fixed_structure() -> void:
 	_expect(_types_at(graph, 4) == [MapNode.NodeType.BATTLE, MapNode.NodeType.SHOP], "depth four branches battle/shop")
 	_expect(graph.get_nodes_at_depth(5)[0].node_type == MapNode.NodeType.EVENT, "depth five is event")
 	_expect(_types_at(graph, 6) == [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE], "depth six branches elite/forge")
-	_expect(graph.get_nodes_at_depth(9)[0].node_type == MapNode.NodeType.BOSS, "depth nine is boss placeholder")
+	_expect(graph.get_nodes_at_depth(9)[0].node_type == MapNode.NodeType.BOSS, "depth nine is the formal Boss node")
 
 
 func _test_determinism() -> void:
@@ -74,7 +74,7 @@ func _test_run_progression() -> void:
 		_expect(run.complete_current_node(), "complete node %s" % node_id)
 		_expect(node.completed, "completed state stored on map node")
 		_expect(not run.enter_node(node_id), "completed node cannot be entered again")
-	_expect(run.map_graph.get_node(run.map_graph.boss_node_id).completed, "route reaches and completes boss placeholder")
+	_expect(run.map_graph.get_node(run.map_graph.boss_node_id).completed, "route reaches and completes formal Boss node")
 
 
 func _resolve_node_for_test(run: RunModel, node: MapNode) -> void:
@@ -92,7 +92,8 @@ func _resolve_node_for_test(run: RunModel, node: MapNode) -> void:
 		MapNode.NodeType.REST:
 			run.skip_rest()
 		MapNode.NodeType.BOSS:
-			run.acknowledge_boss_placeholder()
+			# 地图推进测试不重跑战斗；用总是可选的正式结局验证节点协议。
+			run.record_boss_outcome(&"deliver_seal", 0)
 
 
 func _types_at(graph: MapGraph, depth: int) -> Array[int]:
