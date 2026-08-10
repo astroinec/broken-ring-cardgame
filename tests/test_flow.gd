@@ -34,6 +34,7 @@ func _run() -> void:
 		_expect(not model.tutorial_hint.contains("教学"), "path %d context text is diegetic" % stage)
 
 	await _test_expedition_ui(main)
+	await _test_event_selection_and_event_battle_ui(main)
 
 	# 机制测试场的对手菜单必须列出目录中的每个可选敌人。
 	main._show_test_arena_menu()
@@ -172,12 +173,16 @@ func _test_expedition_ui(main) -> void:
 	await process_frame
 
 	main.run_model.player_hp = 40
+	var expected_rest_hp: int = mini(
+		main.run_model.player_max_hp,
+		40 + maxi(1, floori(float(main.run_model.player_max_hp) * 0.2))
+	)
 	main._on_map_node_pressed(&"d08_00")
 	await process_frame
 	_expect(main.ui_mode == &"rest", "pre-Boss REST node opens correctly")
 	main._on_rest_heal_pressed()
 	await process_frame
-	_expect(main.run_model.player_hp == 54 and main.ui_mode == &"map", "REST heal applies 20 percent and returns to map")
+	_expect(main.run_model.player_hp == expected_rest_hp and main.ui_mode == &"map", "REST heal applies 20 percent and returns to map")
 
 	main._on_map_node_pressed(&"d09_00")
 	await process_frame
@@ -201,6 +206,58 @@ func _test_expedition_ui(main) -> void:
 	_expect(main.ui_mode == &"expedition_complete", "Boss terminal choice reaches the expedition settlement")
 	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "formal Boss can only be completed once through the node protocol")
 	_expect(main.run_model.evidence.has("第十份校准记录"), "hidden Boss ending reaches RunModel evidence")
+
+
+func _test_event_selection_and_event_battle_ui(main) -> void:
+	main._restart_run()
+	await process_frame
+	var event_node_ids: Array[StringName] = [&"d02_01"]
+	main.run_model.available_node_ids = event_node_ids
+	main._on_map_node_pressed(&"d02_01")
+	await process_frame
+	main.run_model.selected_event_id = &"speaking_for_you"
+	main._show_event_screen()
+	await process_frame
+	main._on_event_choice(2)
+	await process_frame
+	_expect(main.ui_mode == &"event_selection", "event card removal opens the rule-layer instance selection page")
+	_expect(_tree_contains_text(main.screen_root, "基础攻击或防御实例"), "event selection displays the rule-layer prompt")
+	main._on_event_selection_cancelled()
+	await process_frame
+	_expect(main.ui_mode == &"event" and main.run_model.pending_event_selection.is_empty(), "event selection cancel returns without mutating the deck")
+	main._on_event_choice(2)
+	await process_frame
+	var chosen_id: int = int(main.run_model.get_pending_event_candidates()[0][&"instance_id"])
+	main._on_event_selection_confirmed(chosen_id)
+	await process_frame
+	_expect(main.ui_mode == &"event_outcome" and not main.run_model.has_deck_instance(chosen_id), "event selection confirms through RunModel and returns to outcome")
+
+	main._restart_run()
+	await process_frame
+	event_node_ids = [&"d02_01"]
+	main.run_model.available_node_ids = event_node_ids
+	main._on_map_node_pressed(&"d02_01")
+	await process_frame
+	main.run_model.selected_event_id = &"definition_tax"
+	main._show_event_screen()
+	await process_frame
+	main._on_event_choice(3)
+	await process_frame
+	_expect(main.ui_mode == &"combat" and main.model.enemy_id == &"reinforced_word_eater", "definition refusal launches the single reinforced event enemy")
+	main.model.battle_over = true
+	main.model.victory = true
+	main._on_battle_result_pressed()
+	await process_frame
+	_expect(main.ui_mode == &"event_outcome" and main.run_model.relics.has(&"wordless_bookplate"), "event combat victory grants reward and returns to event outcome")
+	_expect(main.run_model.map_graph.get_node(&"d02_01").completed, "event combat completes its map node exactly once")
+
+	main.run_model.selected_event_id = &"calibration_station"
+	main.run_model.event_resolved = false
+	main.run_model.apply_event_choice(1)
+	main._show_archive_screen(&"evidence")
+	await process_frame
+	_expect(_tree_contains_text(main.screen_root, "来源：随机事件：校准站"), "archive renders structured evidence source")
+	_expect(_tree_contains_text(main.screen_root, "可替换资产"), "archive renders structured evidence description")
 
 
 func _tree_contains_text(node: Node, fragment: String) -> bool:

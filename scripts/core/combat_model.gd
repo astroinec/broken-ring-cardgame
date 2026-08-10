@@ -34,6 +34,10 @@ var player_max_hp: int = PLAYER_MAX_HP
 var player_block: int = 0
 var energy: int = BASE_ENERGY
 var instability: int = 0
+var instability_threshold: int = INSTABILITY_THRESHOLD
+var fracture_damage: int = FRACTURE_DAMAGE
+var initial_draw_bonus: int = 0
+var battle_evidence_ids: Array[StringName] = []
 var turn_number: int = 1
 var instability_gained_this_turn: bool = false
 var battle_over: bool = false
@@ -129,7 +133,8 @@ func start_battle(
 	p_relics: Array[StringName] = [],
 	p_deck_instances: Array[Dictionary] = [],
 	p_player_hp: int = PLAYER_MAX_HP,
-	p_player_max_hp: int = PLAYER_MAX_HP
+	p_player_max_hp: int = PLAYER_MAX_HP,
+	p_battle_context: Dictionary = {}
 ) -> void:
 	seed_value = p_seed
 	rng.seed = seed_value
@@ -140,6 +145,13 @@ func start_battle(
 	player_block = 0
 	energy = BASE_ENERGY
 	instability = 0
+	instability_threshold = maxi(1, INSTABILITY_THRESHOLD + int(p_battle_context.get(&"instability_threshold_delta", 0)))
+	var damage_override: int = int(p_battle_context.get(&"fracture_damage_override", 0))
+	fracture_damage = damage_override if damage_override > 0 else FRACTURE_DAMAGE
+	initial_draw_bonus = maxi(0, int(p_battle_context.get(&"initial_draw_bonus", 0)))
+	battle_evidence_ids.clear()
+	for raw_evidence_id: Variant in p_battle_context.get(&"evidence_ids", []):
+		battle_evidence_ids.append(raw_evidence_id as StringName)
 	enemy_block = 0
 	enemy_intent_index = 0
 	devour_record_type = -1
@@ -176,6 +188,10 @@ func start_battle(
 	_telemetry_fractures = 0
 	_telemetry_card_uses.clear()
 	rule_engine.reset_for_battle(p_relics)
+	rule_engine.enemy_strength = maxi(0, int(p_battle_context.get(&"enemy_strength", 0)))
+	var initial_law_missing_name: int = maxi(0, int(p_battle_context.get(&"initial_missing_name_law", 0)))
+	if initial_law_missing_name > 0:
+		missing_name[CardData.CardType.LAW] = initial_law_missing_name
 	_configure_tutorial_stage()
 	_configure_enemy(p_enemy_id if p_enemy_id != &"" else EnemyCatalog.enemy_id_for_path_stage(tutorial_stage))
 	if p_deck_instances.is_empty():
@@ -190,6 +206,10 @@ func start_battle(
 	_log("%s出现，生命 %d。" % [enemy_name, enemy_hp])
 	if not rule_engine.relics.is_empty():
 		_log("携带遗物：%s。" % rule_engine.get_relic_text())
+	if instability_threshold != INSTABILITY_THRESHOLD or fracture_damage != FRACTURE_DAMAGE:
+		_log("远征修正：不稳定阈值 %d，裂解伤害 %d。" % [instability_threshold, fracture_damage])
+	if rule_engine.enemy_strength > 0:
+		_log("事件压力：敌人初始力量 +%d。" % rule_engine.enemy_strength)
 	_start_player_turn()
 
 
@@ -1027,6 +1047,8 @@ func _apply_boss_phase_transition() -> void:
 	boss_type_sequence.clear()
 	_log("阶段转换：全部格挡与费用篡改已清除。REC-10 / 可覆写载体。")
 	_log("删名者：我删掉的不是你的名字。我删掉的是他们给你的用途。")
+	if battle_evidence_ids.has(&"obscured_asset_log"):
+		_log("删名者：你已经看过那层遮蔽。‘资产’不是身份，只是他们给可替换身体写的用途。")
 
 
 func _enter_boss_terminal() -> void:
@@ -1100,7 +1122,8 @@ func _start_player_turn() -> void:
 	_resolve_sealed_cards()
 	if battle_over or boss_terminal_choice_pending:
 		return
-	var cards_needed: int = maxi(0, BASE_HAND_SIZE - hand.size())
+	var target_hand_size: int = BASE_HAND_SIZE + initial_draw_bonus if turn_number == 1 else BASE_HAND_SIZE
+	var cards_needed: int = maxi(0, target_hand_size - hand.size())
 	draw_cards(cards_needed, true)
 
 
@@ -1475,11 +1498,11 @@ func _discard_contains_status_from_this_turn() -> bool:
 # -------------------------------------------------------------------- 其他规则
 
 func _check_fracture() -> void:
-	if instability < INSTABILITY_THRESHOLD or battle_over:
+	if instability < instability_threshold or battle_over:
 		return
-	instability -= INSTABILITY_THRESHOLD
+	instability -= instability_threshold
 	_telemetry_fractures += 1
-	var damage: int = rule_engine.compute_fracture_damage(FRACTURE_DAMAGE, prevent_next_fracture_damage)
+	var damage: int = rule_engine.compute_fracture_damage(fracture_damage, prevent_next_fracture_damage)
 	if prevent_next_fracture_damage:
 		prevent_next_fracture_damage = false
 	player_hp = maxi(0, player_hp - damage)

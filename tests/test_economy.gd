@@ -9,6 +9,7 @@ func _init() -> void:
 	_test_removal_service()
 	_test_instance_upgrade()
 	_test_rest_and_forge()
+	_test_rest_salvage_tradeoff()
 	if failures == 0:
 		print("PASS: all economy and upgrade checks")
 		quit(0)
@@ -145,6 +146,20 @@ func _test_rest_and_forge() -> void:
 	var target: Dictionary = run.get_unupgraded_instances()[0]
 	_expect(run.resolve_forge_upgrade(int(target[&"instance_id"])), "forge upgrades selected instance for free")
 	_expect(run.complete_current_node(), "forge node completes")
+
+
+func _test_rest_salvage_tradeoff() -> void:
+	var run: RunModel = RunModel.new()
+	run.start_run(73103)
+	var rest_ids: Array[StringName] = [&"d03_00"]
+	run.available_node_ids = rest_ids
+	_expect(run.enter_node(&"d03_00"), "test can enter the depth-three rest node")
+	var before_ink: int = run.ink_crystals
+	_expect(run.resolve_rest_salvage(), "rest can be spent on salvage income")
+	_expect(run.ink_crystals == before_ink + RunModel.REST_SALVAGE_INCOME, "rest salvage grants exactly thirty ink")
+	_expect(not run.resolve_rest_heal(), "resolved rest cannot also heal")
+	_expect(not run.resolve_rest_upgrade(int(run.deck_instances[0][&"instance_id"])), "resolved rest cannot also upgrade")
+	_expect(run.complete_current_node(), "salvage rest completes through node protocol")
 
 
 func _expect(condition: bool, label: String) -> void:

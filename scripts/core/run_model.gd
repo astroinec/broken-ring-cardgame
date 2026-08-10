@@ -3,15 +3,20 @@ extends RefCounted
 
 
 const DEFAULT_SEED: int = 73103
-const SCHEMA_VERSION: int = 2
+const SCHEMA_VERSION: int = 3
 const REWARD_STAGES: Array[int] = [3, 5, 6]
-const EVENT_IDS: Array[StringName] = [&"authorless_book", &"seventh_dock", &"calibration_station"]
+const EVENT_IDS: Array[StringName] = [
+	&"authorless_book", &"seventh_dock", &"calibration_station",
+	&"speaking_for_you", &"deleted_funeral", &"definition_tax",
+]
+const EVENT_BATTLE_ENEMY_ID: StringName = &"reinforced_word_eater"
 const RARE_REWARD_IDS: Array[StringName] = [
 	&"critical_permission", &"dissolution_protocol", &"prewritten_ending", &"unseal_order", &"homophone",
 ]
 const STARTING_RELIC_IDS: Array[StringName] = [&"crack_stabilizer"]
 const NORMAL_BATTLE_INCOME: int = 12
 const ELITE_BATTLE_INCOME: int = 30
+const REST_SALVAGE_INCOME: int = 30
 
 var schema_version: int = SCHEMA_VERSION
 var seed_value: int = DEFAULT_SEED
@@ -22,7 +27,10 @@ var available_node_ids: Array[StringName] = []
 
 var current_node: int = 0
 var ink_crystals: int = 0
+## 旧测试与存档兼容：继续保存证据标题。
 var evidence: Array[String] = []
+## 新档案协议：每条记录包含 id/title/source/description。
+var evidence_records: Array[Dictionary] = []
 var relics: Array[StringName] = []
 var deck_instances: Array[Dictionary] = []
 var acquired_card_ids: Array[StringName] = []
@@ -35,6 +43,18 @@ var event_outcome: String = ""
 var player_max_hp: int = 70
 var player_hp: int = 70
 var next_battle_missing_name: int = 0
+var next_battle_instability_threshold_delta: int = 0
+var next_battle_enemy_strength: int = 0
+var next_battle_initial_draw_bonus: int = 0
+var next_battle_reward_relic_id: StringName = &""
+## 0 表示使用 CombatModel 默认值；定义税的“疼痛”令后续战斗持续使用 5。
+var fracture_damage_override: int = 0
+var institution_relation: int = 0
+var event_history_hints_hidden: bool = false
+var event_history: Array[String] = []
+var pending_event_selection: Dictionary = {}
+var event_battle_pending: bool = false
+var event_battle_reward_settled: bool = false
 var completed_battles: Array[int] = []
 var boss_ending_id: StringName = &""
 var boss_ending_text: String = ""
@@ -57,6 +77,7 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 	current_node = 0
 	ink_crystals = 0
 	evidence.clear()
+	evidence_records.clear()
 	relics.clear()
 	deck_instances.clear()
 	acquired_card_ids.clear()
@@ -69,6 +90,17 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 	player_max_hp = 70
 	player_hp = 70
 	next_battle_missing_name = 0
+	next_battle_instability_threshold_delta = 0
+	next_battle_enemy_strength = 0
+	next_battle_initial_draw_bonus = 0
+	next_battle_reward_relic_id = &""
+	fracture_damage_override = 0
+	institution_relation = 0
+	event_history_hints_hidden = false
+	event_history.clear()
+	pending_event_selection.clear()
+	event_battle_pending = false
+	event_battle_reward_settled = false
 	completed_battles.clear()
 	boss_ending_id = &""
 	boss_ending_text = ""
@@ -85,6 +117,20 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 
 func get_relic_ids() -> Array[StringName]:
 	return relics.duplicate()
+
+
+func get_evidence_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for record: Dictionary in evidence_records:
+		ids.append(record[&"id"] as StringName)
+	return ids
+
+
+func has_evidence_id(evidence_id: StringName) -> bool:
+	for record: Dictionary in evidence_records:
+		if record[&"id"] == evidence_id:
+			return true
+	return false
 
 
 func get_deck_card_ids() -> Array[StringName]:
@@ -251,6 +297,48 @@ func get_current_map_node() -> MapNode:
 	return null if map_graph == null else map_graph.get_node(current_node_id)
 
 
+## 第一次启动当前节点战斗时消费“一场”修正；失败重试复用同一上下文。
+func consume_current_battle_context() -> Dictionary:
+	if pending_node_resolution.has(&"battle_context"):
+		return (pending_node_resolution[&"battle_context"] as Dictionary).duplicate(true)
+	var context: Dictionary = {
+		&"instability_threshold_delta": next_battle_instability_threshold_delta,
+		&"fracture_damage_override": fracture_damage_override,
+		&"initial_missing_name_law": next_battle_missing_name,
+		&"enemy_strength": next_battle_enemy_strength,
+		&"initial_draw_bonus": next_battle_initial_draw_bonus,
+		&"evidence_ids": get_evidence_ids(),
+	}
+	next_battle_instability_threshold_delta = 0
+	next_battle_missing_name = 0
+	next_battle_enemy_strength = 0
+	next_battle_initial_draw_bonus = 0
+	if not pending_node_resolution.is_empty():
+		pending_node_resolution[&"battle_context"] = context.duplicate(true)
+	return context
+
+
+func is_event_battle_pending() -> bool:
+	return event_battle_pending and selected_event_id == &"definition_tax" and not event_resolved
+
+
+func get_event_battle_enemy_id() -> StringName:
+	return EVENT_BATTLE_ENEMY_ID if is_event_battle_pending() else &""
+
+
+func record_event_battle_victory() -> bool:
+	if not is_event_battle_pending() or event_battle_reward_settled:
+		return false
+	event_battle_reward_settled = true
+	event_battle_pending = false
+	_settle_next_battle_relic_reward()
+	if not relics.has(&"wordless_bookplate"):
+		relics.append(&"wordless_bookplate")
+	event_outcome = "你拒绝交出定义。强化拾字虫独自承担了原本属于两只敌人的压力；胜利后获得遗物“无字藏书票”。"
+	_finish_event()
+	return true
+
+
 func record_current_battle_victory() -> bool:
 	var node: MapNode = get_current_map_node()
 	if node == null or (node.node_type != MapNode.NodeType.BATTLE and node.node_type != MapNode.NodeType.ELITE):
@@ -258,6 +346,7 @@ func record_current_battle_victory() -> bool:
 	if bool(pending_node_resolution.get(&"reward_settled", false)):
 		return false
 	ink_crystals += ELITE_BATTLE_INCOME if node.node_type == MapNode.NodeType.ELITE else NORMAL_BATTLE_INCOME
+	_settle_next_battle_relic_reward()
 	pending_node_resolution[&"reward_settled"] = true
 	pending_node_resolution[&"battle_won"] = true
 	if not completed_battles.has(node.depth):
@@ -386,6 +475,14 @@ func resolve_rest_heal() -> bool:
 	return mark_current_node_resolved()
 
 
+func resolve_rest_salvage() -> bool:
+	var node: MapNode = get_current_map_node()
+	if node == null or node.node_type != MapNode.NodeType.REST or bool(pending_node_resolution.get(&"resolved", false)):
+		return false
+	ink_crystals += REST_SALVAGE_INCOME
+	return mark_current_node_resolved()
+
+
 func resolve_rest_upgrade(instance_id: int) -> bool:
 	var node: MapNode = get_current_map_node()
 	if node == null or node.node_type != MapNode.NodeType.REST or bool(pending_node_resolution.get(&"resolved", false)):
@@ -422,8 +519,12 @@ func record_boss_outcome(choice_id: StringName, recovery_count: int) -> bool:
 	pending_node_resolution[&"boss_choice"] = choice_id
 	pending_node_resolution[&"boss_recoveries"] = recovery_count
 	if choice_id == &"read_original":
-		_add_evidence("第十份校准记录")
+		_add_evidence(&"tenth_calibration_record")
 		boss_ending_text = "你没有立即交出律印，而是读取了被删原文。九种互相冲突的文明答案都写在 REC-10 名下。\n\n弥拉低声说：‘第十种答案，欢迎返航。’她停顿片刻，又改口：‘第七名回收者。’"
+		if has_evidence_id(&"nine_redacted_return_records"):
+			boss_ending_text += "\n\n返航名单上九次相同的涂改终于可以回溯：那不是九名士兵，而是同一实验被注销的九个版本。"
+		if has_evidence_id(&"nonexistent_autopsy"):
+			boss_ending_text += "\n\n那份未发生的尸检也有了解释：所谓伤口其实是版本之间共用的制造接口。"
 	else:
 		boss_ending_text = "你按终末机构命令交付定义律印。无字之城暂时停止坍缩，REC-10 档案在返航前重新封闭。"
 	event_outcome = boss_ending_text
@@ -448,6 +549,9 @@ func begin_event() -> StringName:
 		selected_event_id = EVENT_IDS[event_rng.randi_range(0, EVENT_IDS.size() - 1)]
 	event_resolved = false
 	event_outcome = ""
+	pending_event_selection.clear()
+	event_battle_pending = false
+	event_battle_reward_settled = false
 	return selected_event_id
 
 
@@ -459,6 +563,12 @@ func get_event_title(event_id: StringName = selected_event_id) -> String:
 			return "第七码头"
 		&"calibration_station":
 			return "校准站"
+		&"speaking_for_you":
+			return "替你说话的人"
+		&"deleted_funeral":
+			return "被删除的葬礼"
+		&"definition_tax":
+			return "定义税"
 	return "未知事件"
 
 
@@ -470,6 +580,12 @@ func get_event_story(event_id: StringName = selected_event_id) -> String:
 			return "残骸深处立着一座与终末机构完全相同的码头，但石材年代早了数百年。返航名单上，九个同姓记录被墨迹涂去。"
 		&"calibration_station":
 			return "仍在运行的终末机构设备要求你提交身体编号。屏幕显示：当前编号与上一名回收者拥有相同权限和校准参数，资产标识被遮蔽。"
+		&"speaking_for_you":
+			return "无名同盟成员隔着墙复述你尚未说出口的话。声音并不来自墙后，而像从你的骨骼里折返。"
+		&"deleted_funeral":
+			return "一群没有面孔的人正在为你举行葬礼。墓碑日期是明天，碑面留着一块等待姓名的空白。"
+		&"definition_tax":
+			return "无字之城的收税者要求你交出一个仍属于自己的词。拒绝并不会召来第二只怪物：当前单敌人规则只能诚实地让一只强化拾字虫承担事件战。"
 	return "事件记录缺失。"
 
 
@@ -482,21 +598,35 @@ func get_event_options(event_id: StringName = selected_event_id) -> Array[Dictio
 			options.append(_conditional_option("写下另一个名字", "获得证据“异名索引”。", relics.has(&"wordless_bookplate"), "需要遗物“无字藏书票”"))
 		&"seventh_dock":
 			options.append(_option("检查返航名单", "恢复 8 生命；获得证据“九份涂名返航记录”。"))
-			options.append(_option("敲响返航铃", "获得遗物“过期返航铃”；铃声记录只留下怀疑。"))
+			options.append(_option("敲响返航铃", "下一场战斗敌人力量 +2；胜利后获得遗物“过期返航铃”。"))
 			options.append(_conditional_option("盖上通行章", "获得证据“旧码头回收流程”。", relics.has(&"seventh_dock_stamp"), "需要遗物“第七码头通行章”"))
 		&"calibration_station":
 			options.append(_option("提交当前编号", "恢复 20 生命；下一场战斗初始获得 2 层律式缺名。"))
 			options.append(_option("提交上一名回收者编号", "获得 80 墨晶；获得证据“遮蔽资产日志”。"))
 			options.append(_option("拒绝校准", "最大生命减少 5；获得 1 张确定性随机罕见卡。"))
+		&"speaking_for_you":
+			options.append(_option("继续对话", "固定种子升级 1 个具体未升级实例；下一场战斗不稳定阈值 -1。"))
+			options.append(_option("攻击墙后的人", "获得遗物“复读舌骨”；失去 8 生命。"))
+			options.append(_option("保持沉默", "进入实例选择；移除 1 张基础《校准击》或《临时护式》。"))
+		&"deleted_funeral":
+			options.append(_option("参加自己的葬礼", "最大生命 +5；牌组加入 1 张《旧伤》。"))
+			options.append(_option("擦去墓碑", "进入实例选择；移除 1 张牌并失去 10 当前生命。"))
+			options.append(_conditional_option("询问死因", "获得证据“未发生的尸检”。", relics.has(&"blank_epitaph"), "需要遗物“空白墓志铭”"))
+		&"definition_tax":
+			options.append(_option("交出“疼痛”", "最大生命 -4；本次远征后续裂解伤害 8 → 5。"))
+			options.append(_option("交出“记忆”", "获得 120 墨晶；隐藏事件历史提示，但保留全部证据。"))
+			options.append(_option("交出“服从”", "固定种子获得 1 张罕见卡；终末机构关系 -1。"))
+			options.append(_option("拒绝定义", "进入强化拾字虫单敌人事件战；胜利获得“无字藏书票”。"))
 	return options
 
 
 func apply_event_choice(choice_index: int, event_id: StringName = selected_event_id) -> bool:
-	if event_resolved:
+	if event_resolved or not pending_event_selection.is_empty() or event_battle_pending:
 		return false
 	var options: Array[Dictionary] = get_event_options(event_id)
 	if choice_index < 0 or choice_index >= options.size() or not bool(options[choice_index][&"enabled"]):
 		return false
+	selected_event_id = event_id
 	match event_id:
 		&"authorless_book":
 			match choice_index:
@@ -509,46 +639,139 @@ func apply_event_choice(choice_index: int, event_id: StringName = selected_event
 					_add_deck_card(&"redaction", true)
 					event_outcome = "下一页在手中变成墨晶。墨晶 +60，牌组加入《删节》。"
 				2:
-					_add_evidence("异名索引")
-					event_outcome = "书页接受了另一个名字。获得证据“异名索引”。"
+					_add_evidence(&"alternate_name_index")
+					next_battle_initial_draw_bonus += 2
+					event_outcome = "书页接受了另一个名字。获得证据“异名索引”；下一场战斗初始多抽 2 张。"
 		&"seventh_dock":
 			match choice_index:
 				0:
 					player_hp = mini(player_max_hp, player_hp + 8)
-					_add_evidence("九份涂名返航记录")
+					_add_evidence(&"nine_redacted_return_records")
 					event_outcome = "名单没有给出答案，只留下九次相似的涂改。生命 +8，获得证据。"
 				1:
-					if not relics.has(&"expired_return_bell"):
-						relics.append(&"expired_return_bell")
-					_add_evidence("过期铃声记录")
-					event_outcome = "返航铃进入档案。获得遗物与疑点记录。"
+					next_battle_enemy_strength += 2
+					next_battle_reward_relic_id = &"expired_return_bell"
+					event_outcome = "返航铃惊醒了下一名敌人：下场敌人力量 +2，胜利后才获得“过期返航铃”。"
 				2:
-					_add_evidence("旧码头回收流程")
+					_add_evidence(&"old_dock_recovery_process")
 					event_outcome = "旧档案显示两套流程高度相似，但不足以证明谁复制了谁。获得证据。"
 		&"calibration_station":
 			match choice_index:
 				0:
 					player_hp = mini(player_max_hp, player_hp + 20)
 					next_battle_missing_name = 2
-					_add_evidence("重复校准参数")
+					_add_evidence(&"repeated_calibration_parameters")
 					event_outcome = "设备接受了编号。生命 +20；记录下场律式缺名 2，并获得重复参数疑点。"
 				1:
 					ink_crystals += 80
-					_add_evidence("遮蔽资产日志")
+					_add_evidence(&"obscured_asset_log")
 					event_outcome = "两个编号返回相同权限。墨晶 +80，获得证据“遮蔽资产日志”。"
 				2:
 					player_max_hp = maxi(1, player_max_hp - 5)
 					player_hp = mini(player_hp, player_max_hp)
-					var rare_rng: RandomNumberGenerator = RandomNumberGenerator.new()
-					rare_rng.seed = seed_value + 9013
-					var rare_id: StringName = RARE_REWARD_IDS[rare_rng.randi_range(0, RARE_REWARD_IDS.size() - 1)]
+					var rare_id: StringName = _deterministic_rare_card(9013)
 					_add_deck_card(rare_id, true)
 					event_outcome = "你拒绝让设备定义身体。最大生命 -5，获得《%s》。" % CardCatalog.get_definition(rare_id)[&"title"]
+		&"speaking_for_you":
+			match choice_index:
+				0:
+					var candidates: Array[Dictionary] = get_unupgraded_instances()
+					if candidates.is_empty():
+						return false
+					var upgrade_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+					upgrade_rng.seed = seed_value + 12017
+					var chosen: Dictionary = candidates[upgrade_rng.randi_range(0, candidates.size() - 1)]
+					var instance_id: int = int(chosen[&"instance_id"])
+					if not upgrade_card_instance(instance_id):
+						return false
+					next_battle_instability_threshold_delta -= 1
+					event_outcome = "墙后的声音替你完成一句话。升级实例 #%d《%s》；下一场不稳定阈值 -1。" % [instance_id, CardCatalog.get_definition(chosen[&"card_id"] as StringName)[&"title"]]
+				1:
+					player_hp = maxi(0, player_hp - 8)
+					if not relics.has(&"echo_hyoid"):
+						relics.append(&"echo_hyoid")
+					event_outcome = "墙体碎裂，里面只有与你共振的骨骼。生命 -8，获得遗物“复读舌骨”。"
+				2:
+					_begin_event_selection(&"remove_basic", "选择 1 个基础攻击或防御实例移除。", _basic_removal_candidates())
+					return true
+		&"deleted_funeral":
+			match choice_index:
+				0:
+					player_max_hp += 5
+					_add_deck_card(&"old_wound", true)
+					event_outcome = "你参加了自己的葬礼。最大生命 +5，牌组加入《旧伤》。"
+				1:
+					_begin_event_selection(&"remove_any_lose_hp", "选择 1 个具体牌组实例移除；确认后失去 10 当前生命。", get_deck_instances())
+					return true
+				2:
+					_add_evidence(&"nonexistent_autopsy")
+					event_outcome = "尸检没有描述伤口，只列出回收者制造接口。获得证据“未发生的尸检”。"
+		&"definition_tax":
+			match choice_index:
+				0:
+					player_max_hp = maxi(1, player_max_hp - 4)
+					player_hp = mini(player_hp, player_max_hp)
+					fracture_damage_override = 5
+					event_outcome = "你交出“疼痛”。最大生命 -4；从此直到本次远征结束，后续每场裂解伤害固定为 5。"
+				1:
+					ink_crystals += 120
+					event_history_hints_hidden = true
+					event_outcome = "你交出“记忆”。墨晶 +120；事件历史提示已隐藏，但证据记录完整保留。"
+				2:
+					var rare_id: StringName = _deterministic_rare_card(14033)
+					_add_deck_card(rare_id, true)
+					institution_relation -= 1
+					event_outcome = "你交出“服从”。获得《%s》；终末机构关系 -1。" % CardCatalog.get_definition(rare_id)[&"title"]
+				3:
+					event_battle_pending = true
+					event_battle_reward_settled = false
+					event_outcome = "收税者退入文字背后。一只强化拾字虫进入单敌人事件战。"
+					return true
 		_:
 			return false
-	event_resolved = true
-	if not pending_node_resolution.is_empty():
-		pending_node_resolution[&"resolved"] = true
+	_finish_event()
+	return true
+
+
+func get_pending_event_selection() -> Dictionary:
+	return pending_event_selection.duplicate(true)
+
+
+func get_pending_event_candidates() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for raw_candidate: Variant in pending_event_selection.get(&"candidates", []):
+		result.append((raw_candidate as Dictionary).duplicate(true))
+	return result
+
+
+func resolve_event_selection(instance_id: int) -> bool:
+	if pending_event_selection.is_empty() or event_resolved:
+		return false
+	var candidate_found: bool = false
+	for candidate: Dictionary in get_pending_event_candidates():
+		if int(candidate[&"instance_id"]) == instance_id:
+			candidate_found = true
+			break
+	if not candidate_found or not remove_card_instance(instance_id):
+		return false
+	var kind: StringName = pending_event_selection[&"kind"] as StringName
+	pending_event_selection.clear()
+	if kind == &"remove_basic":
+		event_outcome = "你保持沉默，墙后也停止复述。已移除基础牌实例 #%d。" % instance_id
+	elif kind == &"remove_any_lose_hp":
+		player_hp = maxi(0, player_hp - 10)
+		event_outcome = "墓碑上的字连同牌组实例 #%d 一起消失。当前生命 -10。" % instance_id
+	else:
+		return false
+	_finish_event()
+	return true
+
+
+func cancel_event_selection() -> bool:
+	if pending_event_selection.is_empty() or event_resolved:
+		return false
+	pending_event_selection.clear()
+	event_outcome = ""
 	return true
 
 
@@ -589,9 +812,58 @@ func _completed_node_count() -> int:
 	return count
 
 
-func _add_evidence(entry: String) -> void:
-	if not evidence.has(entry):
-		evidence.append(entry)
+func _add_evidence(evidence_id: StringName) -> void:
+	if has_evidence_id(evidence_id):
+		return
+	var record: Dictionary = EvidenceCatalog.get_record(evidence_id)
+	evidence_records.append(record)
+	var title: String = str(record[&"title"])
+	if not evidence.has(title):
+		evidence.append(title)
+
+
+func _finish_event() -> void:
+	event_resolved = true
+	pending_event_selection.clear()
+	event_battle_pending = false
+	if not event_outcome.is_empty():
+		event_history.append("%s：%s" % [get_event_title(), event_outcome])
+	if not pending_node_resolution.is_empty():
+		pending_node_resolution[&"resolved"] = true
+
+
+func _begin_event_selection(kind: StringName, prompt: String, candidates: Array[Dictionary]) -> void:
+	pending_event_selection = {
+		&"kind": kind,
+		&"prompt": prompt,
+		&"candidates": candidates.duplicate(true),
+	}
+
+
+func _basic_removal_candidates() -> Array[Dictionary]:
+	var candidates: Array[Dictionary] = []
+	for instance: Dictionary in deck_instances:
+		var card_id: StringName = instance[&"card_id"] as StringName
+		if card_id == &"calibration_strike" or card_id == &"temporary_guard":
+			candidates.append(instance.duplicate(true))
+	return candidates
+
+
+func _deterministic_rare_card(seed_offset: int) -> StringName:
+	var rare_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rare_rng.seed = seed_value + seed_offset
+	return RARE_REWARD_IDS[rare_rng.randi_range(0, RARE_REWARD_IDS.size() - 1)]
+
+
+func _settle_next_battle_relic_reward() -> void:
+	if next_battle_reward_relic_id == &"":
+		return
+	var reward_id: StringName = next_battle_reward_relic_id
+	next_battle_reward_relic_id = &""
+	if not relics.has(reward_id):
+		relics.append(reward_id)
+	if reward_id == &"expired_return_bell":
+		_add_evidence(&"overdue_bell_record")
 
 
 func _option(label: String, consequence: String) -> Dictionary:

@@ -55,6 +55,9 @@ jobs:
       - name: Run name eraser Boss tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_boss.gd'
 
+      - name: Run six-event and evidence tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_events.gd'
+
       - name: Run Chinese font tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_chinese_font.gd'
 
@@ -66,6 +69,9 @@ jobs:
 
       - name: Run deterministic Boss simulation
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_boss.gd'
+
+      - name: Run deterministic chapter simulation
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_chapter.gd'
 
       - name: Smoke-test main scene
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --quit-after 8'

@@ -12,6 +12,7 @@ func _init() -> void:
 	_test_missing_name_strength_and_echo()
 	_test_terminal_choices_and_target_lock()
 	_test_run_outcomes_and_deck_isolation()
+	_test_evidence_changes_boss_context_and_settlement()
 	if failures == 0:
 		print("PASS: all M2 Boss protocol checks")
 		quit(0)
@@ -179,6 +180,31 @@ func _test_run_outcomes_and_deck_isolation() -> void:
 	_expect(run.evidence.has("第十份校准记录"), "read-original ending adds the designed evidence")
 	_expect(run.boss_ending_text.contains("第十种答案") and run.boss_ending_text.contains("第七名回收者"), "hidden settlement contains Mira's correction")
 	_expect(run.get_deck_instances() == deck_before, "Boss settlement leaves the permanent deck unchanged")
+
+
+func _test_evidence_changes_boss_context_and_settlement() -> void:
+	var context: Dictionary = {&"evidence_ids": [&"obscured_asset_log"]}
+	var battle: CombatModel = CombatModel.new()
+	var no_bonus: Array[StringName] = []
+	var no_relics: Array[StringName] = []
+	battle.start_battle(91010, 6, no_bonus, &"name_eraser", no_relics, [], 500, 500, context)
+	battle._apply_boss_phase_transition()
+	_expect(_logs_contain(battle, "你已经看过那层遮蔽"), "asset-log evidence changes the Boss phase-transition line through combat context")
+
+	var run: RunModel = RunModel.new()
+	run.start_run(91011)
+	run.selected_event_id = &"seventh_dock"
+	run.apply_event_choice(0)
+	run.event_resolved = false
+	run.selected_event_id = &"deleted_funeral"
+	run.relics.append(&"blank_epitaph")
+	run.apply_event_choice(2)
+	var boss_id: StringName = run.map_graph.boss_node_id
+	run.available_node_ids = [boss_id]
+	_expect(run.enter_node(boss_id), "evidence settlement enters formal Boss node")
+	_expect(run.record_boss_outcome(&"read_original", 2), "evidence settlement records read-original ending")
+	_expect(run.boss_ending_text.contains("九个版本") and run.boss_ending_text.contains("制造接口"), "old evidence adds two traceable explanations to Boss settlement")
+	_expect(run.evidence.has("第十份校准记录") and run.evidence_records.size() == 3, "Boss settlement keeps legacy evidence titles and structured records in sync")
 
 
 func _new_boss(seed_value: int) -> CombatModel:

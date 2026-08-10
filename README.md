@@ -17,14 +17,17 @@ PROJECT=.
 # 导入并检查脚本解析
 "$GODOT" --headless --path "$PROJECT" --editor --quit
 
-# 全部规则测试
+# 核心规则与流程测试（CI还会运行地图、经济、UI、Boss和六事件专项测试）
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_combat.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_run.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_flow.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_boss.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_events.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_chinese_font.gd
 
-# 确定性数值模拟（含平衡阈值断言）
+# 确定性模拟（战斗平衡、远征经济、Boss与完整章节）
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_balance.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/sim_chapter.gd
 
 # 主场景冒烟
 "$GODOT" --headless --path "$PROJECT" --quit-after 8
@@ -76,7 +79,7 @@ docs/             协作与数值调整指引
 - 9 层固定结构分叉地图 + 1 个独立机制测试场
 - 战斗、精英、事件、商店、锻造、休整与正式Boss节点
 - 删名者两阶段战斗、可逆卡牌信息删除、终结选择与最小章节结算
-- 3 个文字事件
+- 6 个文字事件、结构化证据档案与旧线索结算回收
 - 种子固定的商店库存与价格、卡牌购买、实例移除、固定路线升级
 - 2 件已接线遗物，6 件留数据位
 

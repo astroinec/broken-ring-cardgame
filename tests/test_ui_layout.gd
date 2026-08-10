@@ -30,10 +30,15 @@ func _run() -> void:
 	_expect(_scroll_has_overflow("DeckList"), "long deck view scrolls instead of hiding cards")
 	_expect(_find_button_with_text(main.screen_root, "返回地图") != null, "deck return action remains visible")
 
+	main.run_model.selected_event_id = &"calibration_station"
+	main.run_model.event_resolved = false
+	main.run_model.apply_event_choice(1)
 	main._show_archive_screen(&"evidence")
 	await process_frame
 	_check_current_page("archive", true, true)
 	_expect(_find_named(main.screen_root, "ArchiveContent") != null, "archive combines run state, relics and evidence")
+	_expect(_tree_contains_text(main.screen_root, "来源：随机事件：校准站"), "archive shows evidence source in the responsive scroll page")
+	_expect(_tree_contains_text(main.screen_root, "可替换资产"), "archive shows evidence description in the responsive scroll page")
 
 	main.run_model.pending_shop_stock = ShopCatalog.generate(73103, main.run_model.shop_remove_count)
 	main._show_shop_screen()
@@ -67,6 +72,16 @@ func _run() -> void:
 	await process_frame
 	_check_current_page("event", true, true)
 	_expect(_find_named(main.screen_root, "EventContent") != null, "event story and options use scrollable content")
+
+	main.run_model.selected_event_id = &"deleted_funeral"
+	main.run_model.event_resolved = false
+	main.run_model.apply_event_choice(1)
+	main._show_event_selection_screen()
+	await process_frame
+	_check_current_page("event selection", true, true)
+	_expect(_find_named(main.screen_root, "EventSelectionList") != null, "event instance selection uses scrollable content")
+	_expect(_scroll_has_overflow("EventSelectionList"), "long event instance selection scrolls instead of clipping")
+	_expect(_find_button_with_text(main.screen_root, "取消选择") != null, "event selection cancel remains visible in fixed footer")
 
 	main.model = CombatModel.new()
 	var no_bonus: Array[StringName] = []
@@ -157,6 +172,17 @@ func _find_button_with_text(node: Node, fragment: String) -> Button:
 		if found != null:
 			return found
 	return null
+
+
+func _tree_contains_text(node: Node, fragment: String) -> bool:
+	if node is Button and (node as Button).text.contains(fragment):
+		return true
+	if node is Label and (node as Label).text.contains(fragment):
+		return true
+	for child: Node in node.get_children():
+		if _tree_contains_text(child, fragment):
+			return true
+	return false
 
 
 func _expect(condition: bool, label: String) -> void:

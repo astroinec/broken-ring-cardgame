@@ -178,6 +178,43 @@ const DEFINITIONS: Dictionary = {
 			},
 		],
 	},
+	&"reinforced_word_eater": {
+		&"name": "强化拾字虫", &"tier": "事件战", &"hp_min": 58, &"hp_max": 58,
+		&"traits": [EnemyDefinition.TRAIT_DEVOUR],
+		&"intro_line": "它只有一只。收税者把原本属于两只拾字虫的压力压进了同一副口器。",
+		&"intents": [
+			{
+				&"id": &"tax_gnaw", &"name": "税契啃噬", &"description": "造成 9 点伤害",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 9, &"action": "税契啃噬"},
+				],
+			},
+			{
+				&"id": &"tax_steal", &"name": "征收字义",
+				&"operations": [
+					{
+						&"kind": EnemyOperation.Kind.APPLY_MISSING_NAME_RECORDED, &"amount": 2,
+						&"condition": EnemyOperation.Condition.HAS_DEVOUR_RECORD,
+						&"label": "施加 2 层{type}缺名",
+						&"log": "征收字义：你获得 2 层{type}缺名。",
+					},
+					{
+						&"kind": EnemyOperation.Kind.GAIN_BLOCK, &"amount": 8,
+						&"condition": EnemyOperation.Condition.NO_DEVOUR_RECORD,
+						&"label": "未记录类别，获得 8 格挡",
+						&"log": "征收字义未找到记录：{enemy}获得 8 格挡。",
+					},
+				],
+			},
+			{
+				&"id": &"tax_spit", &"name": "复合吐墨", &"description": "造成 6×2 点伤害，清除记录",
+				&"operations": [
+					{&"kind": EnemyOperation.Kind.ATTACK, &"amount": 6, &"times": 2, &"action": "复合吐墨"},
+					{&"kind": EnemyOperation.Kind.CLEAR_DEVOUR_RECORD, &"log": "{enemy}清除了吞字记录。"},
+				],
+			},
+		],
+	},
 
 	# ---------- 正式敌人 ----------
 	&"hollow_name_guard": {

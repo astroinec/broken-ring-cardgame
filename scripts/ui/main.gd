@@ -281,7 +281,9 @@ func _show_archive_screen(section: StringName = &"relics") -> void:
 	state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_child(state)
 	_add_archive_section(content, "遗物", _relic_entry_names(), section == &"relics")
-	_add_archive_section(content, "证据", run_model.evidence, section == &"evidence")
+	_add_evidence_archive_section(content, section == &"evidence")
+	var history_entries: Array = ["事件历史提示已隐藏；证据档案不受影响。"] if run_model.event_history_hints_hidden else run_model.event_history
+	_add_archive_section(content, "事件历史", history_entries, false)
 	var footer: HBoxContainer = _add_page_footer(archive_page)
 	var deck: Button = _configure_button(Button.new())
 	deck.text = "查看牌组"
@@ -311,6 +313,30 @@ func _add_archive_section(parent: VBoxContainer, heading_text: String, entries: 
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		parent.add_child(label)
+
+
+func _add_evidence_archive_section(parent: VBoxContainer, emphasized: bool) -> void:
+	var heading: Label = Label.new()
+	heading.text = "证据"
+	heading.add_theme_font_size_override("font_size", 24 if emphasized else 21)
+	heading.add_theme_color_override("font_color", Color("ffd27d") if emphasized else Color("e7d9b5"))
+	parent.add_child(heading)
+	if run_model.evidence_records.is_empty():
+		var empty: Label = Label.new()
+		empty.text = "尚无记录"
+		empty.add_theme_color_override("font_color", Color("8295a8"))
+		parent.add_child(empty)
+		return
+	for record: Dictionary in run_model.evidence_records:
+		var panel: PanelContainer = PanelContainer.new()
+		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_theme_stylebox_override("panel", _panel_style(Color("171f2b"), Color("536980"), 8))
+		parent.add_child(panel)
+		var label: Label = Label.new()
+		label.text = "%s\n来源：%s\n%s" % [record[&"title"], record[&"source"], record[&"description"]]
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.add_child(label)
 
 
 func _on_map_node_pressed(node_id: StringName) -> void:
@@ -463,7 +489,7 @@ func _on_upgrade_skipped(mode: StringName) -> void:
 func _show_rest_screen() -> void:
 	ui_mode = &"rest"
 	_clear_screen()
-	var rest_page: VBoxContainer = _create_page("休整", "恢复20%最大生命、升级一张牌，或跳过。")
+	var rest_page: VBoxContainer = _create_page("休整", "恢复生命、升级一张牌、回收墨晶，三者只能选择其一。")
 	var options: VBoxContainer = _add_page_scroll(rest_page, "RestOptions")
 	options.alignment = BoxContainer.ALIGNMENT_CENTER
 	var heal_amount: int = maxi(1, floori(float(run_model.player_max_hp) * 0.2))
@@ -479,6 +505,10 @@ func _show_rest_screen() -> void:
 	upgrade.tooltip_text = "没有可升级实例" if upgrade.disabled else ""
 	upgrade.pressed.connect(_show_rest_upgrade_screen)
 	options.add_child(upgrade)
+	var salvage: Button = _configure_button(Button.new(), 64)
+	salvage.text = "回收残页｜获得 %d 墨晶（放弃本次恢复或升级）" % RunModel.REST_SALVAGE_INCOME
+	salvage.pressed.connect(_on_rest_salvage_pressed)
+	options.add_child(salvage)
 	var footer: HBoxContainer = _add_page_footer(rest_page)
 	var skip: Button = _configure_button(Button.new(), 48)
 	skip.text = "跳过并返回地图"
@@ -488,6 +518,11 @@ func _show_rest_screen() -> void:
 
 func _on_rest_heal_pressed() -> void:
 	if run_model.resolve_rest_heal() and run_model.complete_current_node():
+		_show_map_screen()
+
+
+func _on_rest_salvage_pressed() -> void:
+	if run_model.resolve_rest_salvage() and run_model.complete_current_node():
 		_show_map_screen()
 
 
@@ -647,15 +682,17 @@ func _start_current_battle() -> void:
 			_show_map_screen()
 			return
 		current_stage = clampi(node.depth, CombatModel.TUTORIAL_STAGE_MIN, CombatModel.TUTORIAL_STAGE_MAX)
+		var enemy_id: StringName = run_model.get_event_battle_enemy_id() if run_model.is_event_battle_pending() else node.enemy_id
 		model.start_battle(
 			node.content_seed,
 			current_stage,
 			[],
-			node.enemy_id,
+			enemy_id,
 			run_model.get_relic_ids(),
 			run_model.get_deck_instances(),
 			run_model.player_hp,
-			run_model.player_max_hp
+			run_model.player_max_hp,
+			run_model.consume_current_battle_context()
 		)
 	_build_combat_screen()
 	_refresh_combat()
@@ -709,7 +746,7 @@ func _build_combat_screen() -> void:
 	_add_stat(stats, "生命", "%d / %d" % [model.player_hp, model.player_max_hp])
 	_add_stat(stats, "稳定度", "%d / %d" % [model.energy, CombatModel.BASE_ENERGY])
 	_add_stat(stats, "格挡", str(model.player_block))
-	_add_stat(stats, "不稳定", "%d / %d" % [model.instability, CombatModel.INSTABILITY_THRESHOLD] if model.is_mechanic_unlocked(&"overload") else "读数稳定")
+	_add_stat(stats, "不稳定", "%d / %d" % [model.instability, model.instability_threshold] if model.is_mechanic_unlocked(&"overload") else "读数稳定")
 	_add_stat(stats, "牌堆", "抽%d 弃%d 逝%d" % [model.draw_pile.size(), model.discard_pile.size(), model.exhausted_zone.size()])
 	_add_stat(stats, "状态", model.get_player_status_text())
 	_add_stat(stats, "远征", "牌%d 墨晶%d" % [run_model.deck_instances.size(), run_model.ink_crystals])
@@ -928,6 +965,10 @@ func _on_battle_result_pressed() -> void:
 		_show_main_menu()
 		return
 	run_model.player_hp = model.player_hp
+	if run_model.is_event_battle_pending():
+		if run_model.record_event_battle_victory() and run_model.complete_current_node():
+			_show_summary_screen()
+		return
 	run_model.record_battle_victory(current_stage)
 	if run_model.should_offer_reward(current_stage):
 		run_model.generate_reward_choices(current_stage)
@@ -1058,8 +1099,42 @@ func _show_event_screen() -> void:
 	footer.add_child(prompt)
 
 
+func _show_event_selection_screen() -> void:
+	ui_mode = &"event_selection"
+	_clear_screen()
+	var selection: Dictionary = run_model.get_pending_event_selection()
+	var selection_page: VBoxContainer = _create_page("事件实例选择", str(selection.get(&"prompt", "选择一个具体牌组实例。")))
+	var list: VBoxContainer = _add_page_scroll(selection_page, "EventSelectionList")
+	for instance: Dictionary in run_model.get_pending_event_candidates():
+		var button: Button = _configure_button(Button.new(), 72)
+		button.text = run_model.describe_deck_instance(instance)
+		button.pressed.connect(_on_event_selection_confirmed.bind(int(instance[&"instance_id"])))
+		list.add_child(button)
+	var footer: HBoxContainer = _add_page_footer(selection_page)
+	var cancel: Button = _configure_button(Button.new(), 48)
+	cancel.text = "取消选择并返回事件"
+	cancel.pressed.connect(_on_event_selection_cancelled)
+	footer.add_child(cancel)
+
+
+func _on_event_selection_confirmed(instance_id: int) -> void:
+	if run_model.resolve_event_selection(instance_id) and run_model.complete_current_node():
+		_show_summary_screen()
+
+
+func _on_event_selection_cancelled() -> void:
+	if run_model.cancel_event_selection():
+		_show_event_screen()
+
+
 func _on_event_choice(index: int) -> void:
-	if run_model.apply_event_choice(index) and run_model.complete_current_node():
+	if not run_model.apply_event_choice(index):
+		return
+	if not run_model.pending_event_selection.is_empty():
+		_show_event_selection_screen()
+	elif run_model.is_event_battle_pending():
+		_start_current_battle()
+	elif run_model.event_resolved and run_model.complete_current_node():
 		_show_summary_screen()
 
 

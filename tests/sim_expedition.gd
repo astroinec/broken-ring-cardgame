@@ -95,7 +95,10 @@ func _simulate(seed_value: int, policy: RoutePolicy) -> Dictionary:
 					upgraded = run.resolve_forge_upgrade(int(candidates[0][&"instance_id"]))
 				run.complete_current_node()
 			MapNode.NodeType.REST:
-				run.skip_rest()
+				if policy == RoutePolicy.EVENT_ECONOMY and node.depth == 3:
+					run.resolve_rest_salvage()
+				else:
+					run.skip_rest()
 				run.complete_current_node()
 			MapNode.NodeType.BOSS:
 				# 远征经济模拟只验证路线/经济；Boss战本体由sim_boss覆盖。
@@ -199,9 +202,12 @@ func _summarize_and_assert(event_results: Array[Dictionary], battle_results: Arr
 	_expect(_count_true(battle_results, &"relic_affordable") == 0, "routes without high event income cannot afford a relic at depth four")
 	_expect(purchases > 0 and spent > 0, "ink has both battle/event sources and actual shop sinks")
 	_expect(_count_true(event_results, &"upgraded") == event_results.size(), "forge route upgrades one card in every simulated expedition")
+	var forced_tradeoffs: int = 0
 	for result: Dictionary in event_results:
-		if bool(result[&"removal_affordable"]):
-			_expect(not bool(result[&"removal_plus_common_affordable"]), "seed %d must choose between first removal and a common card" % result[&"seed"])
+		if bool(result[&"removal_affordable"]) and not bool(result[&"high_event_income"]):
+			forced_tradeoffs += 1
+			_expect(not bool(result[&"removal_plus_common_affordable"]), "seed %d without event windfall must choose between first removal and a common card" % result[&"seed"])
+	_expect(forced_tradeoffs > 0, "at least one event route faces the intended removal-versus-purchase tradeoff")
 	_expect(str(event_results[0][&"digest"]) != str(battle_results[0][&"digest"]), "route choice changes the deterministic expedition fingerprint")
 
 

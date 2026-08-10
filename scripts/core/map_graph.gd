@@ -21,7 +21,10 @@ const BATTLE_ENEMY_POOLS: Dictionary = {
 	7: [&"word_eater", &"reverse_reader"],
 }
 const ELITE_ENEMY_IDS: Array[StringName] = [&"binding_instrument"]
-const EVENT_IDS: Array[StringName] = [&"authorless_book", &"seventh_dock", &"calibration_station"]
+const EVENT_IDS: Array[StringName] = [
+	&"authorless_book", &"seventh_dock", &"calibration_station",
+	&"speaking_for_you", &"deleted_funeral", &"definition_tax",
+]
 
 var seed_value: int = 0
 var nodes_by_id: Dictionary = {}
@@ -171,7 +174,10 @@ func _assign_content(node: MapNode) -> void:
 		MapNode.NodeType.ELITE:
 			node.enemy_id = ELITE_ENEMY_IDS[content_rng.randi_range(0, ELITE_ENEMY_IDS.size() - 1)]
 		MapNode.NodeType.EVENT:
-			node.event_id = EVENT_IDS[content_rng.randi_range(0, EVENT_IDS.size() - 1)]
+			# 直接混合种子的十位以上信息，避免常用奇数种子在模6时只落入少数事件。
+			# 两个事件深度相差3层，乘3后会落到事件池的另一半，扩大单局覆盖。
+			var event_index: int = posmod(int(seed_value / 10) + node.depth * 3 + node.lane * 5, EVENT_IDS.size())
+			node.event_id = EVENT_IDS[event_index]
 		MapNode.NodeType.BOSS:
 			node.enemy_id = &"name_eraser"
 
