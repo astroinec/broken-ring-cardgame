@@ -167,15 +167,24 @@ func _run() -> void:
 	main.is_test_mode = false
 	main.model.start_battle(73109, CombatModel.TUTORIAL_STAGE_MAX, relic_bonus_cards, &"name_eraser", all_relics)
 	main.model.boss_phase = 2
+	main.model.enemy_intent_index = 2
 	main.model.enemy_hp = 54
 	main.model.player_hp = 8
 	main.model.energy = 0
+	main.model.boss_strength = 6
+	main.model.missing_name[CardData.CardType.LAW] = 3
+	for card: CardData in main.model.hand:
+		if card.card_type != CardData.CardType.STATUS:
+			main.model.boss_deleted_types[card.instance_id] = {&"order": card.instance_id}
+		var keywords: Array[StringName] = main.model.get_card_keywords(card)
+		if not keywords.is_empty():
+			main.model.boss_deleted_keywords[card.instance_id] = {&"order": card.instance_id, &"keywords": keywords}
 	main._refresh_combat()
 	await process_frame
 	var combat_footer: Control = _find_named(main.screen_root, "CombatFooter") as Control
 	var end_turn: Button = _find_named(main.screen_root, "EndTurnButton") as Button
 	_expect(main.screen_root.size.y <= 720.0, "Boss long-intent layout does not heighten root beyond logical viewport")
-	_expect(main.page.get_combined_minimum_size().y <= 696.0, "Boss combat page fits inside vertical margins")
+	_expect(main.page.get_combined_minimum_size().y <= 668.0, "worst-case Boss combat page keeps at least 28 vertical safety pixels")
 	_expect(combat_footer != null and combat_footer.position.y + combat_footer.size.y <= main.page.size.y + 0.5, "Boss combat footer remains inside viewport")
 	_expect(end_turn != null and end_turn.visible and not end_turn.disabled, "zero-energy Boss state keeps End Turn visible and enabled")
 	_expect(_tree_contains_text(main.screen_root, "无可打出的牌｜请结束回合"), "zero-energy state explains why cards are disabled")
@@ -225,6 +234,10 @@ func _check_current_page(label: String, expect_scroll: bool, expect_footer: bool
 		_expect(footer != null, "%s has a fixed footer" % label)
 		if footer != null:
 			_expect(footer.position.y + footer.size.y <= page.size.y + 0.5, "%s footer remains inside viewport" % label)
+			var bottom_gap: float = page.size.y - (footer.position.y + footer.size.y)
+			_expect(bottom_gap >= 12.0, "%s footer keeps at least 12 vertical safety pixels" % label)
+		var safety: Control = _find_named(page, "PageBottomSafety") as Control
+		_expect(safety != null and safety.custom_minimum_size.y >= 12.0, "%s declares a 12-pixel bottom safety spacer" % label)
 
 
 func _scroll_has_overflow(content_name: String) -> bool:

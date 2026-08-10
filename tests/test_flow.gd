@@ -36,7 +36,7 @@ func _run() -> void:
 	main._show_main_menu()
 	await process_frame
 	_expect(_find_button_with_text(main.screen_root, "继续远征") != null, "有效存档在标题页显示继续远征")
-	_expect(_tree_contains_text(main.screen_root, "固定种子 73103"), "有效存档在标题页显示摘要")
+	_expect(_tree_contains_text(main.screen_root, main.run_model.get_summary_text()), "有效存档在标题页显示摘要")
 	main.run_model.player_hp = 1
 	main._continue_run()
 	await process_frame
@@ -249,7 +249,7 @@ func _test_event_selection_and_event_battle_ui(main) -> void:
 	main._on_event_choice(2)
 	await process_frame
 	_expect(main.ui_mode == &"event_selection", "event card removal opens the rule-layer instance selection page")
-	_expect(_tree_contains_text(main.screen_root, "基础攻击或防御实例"), "event selection displays the rule-layer prompt")
+	_expect(_tree_contains_text(main.screen_root, "基础攻击或防御牌"), "event selection displays the rule-layer prompt")
 	main._on_event_selection_cancelled()
 	await process_frame
 	_expect(main.ui_mode == &"event" and main.run_model.pending_event_selection.is_empty(), "event selection cancel returns without mutating the deck")

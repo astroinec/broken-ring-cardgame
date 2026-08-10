@@ -587,6 +587,9 @@ func _clear_play_state() -> void:
 func end_player_turn() -> void:
 	if battle_over or boss_terminal_choice_pending or pending_selection != null:
 		return
+	_resolve_old_wounds_in_hand()
+	if battle_over:
+		return
 	_log("结束第 %d 回合：弃置 %d 张手牌。" % [turn_number, hand.size()])
 	_ended_hand_snapshot = hand.duplicate()
 	while not hand.is_empty():
@@ -599,6 +602,27 @@ func end_player_turn() -> void:
 		return
 	turn_number += 1
 	_start_player_turn()
+
+
+func _resolve_old_wounds_in_hand() -> void:
+	var wound_count: int = 0
+	for card: CardData in hand:
+		if card.id == &"old_wound":
+			wound_count += 1
+	for wound_index: int in range(wound_count):
+		var damage: int = rule_engine.compute_unblocked_status_damage(2)
+		var previous_hp: int = player_hp
+		var bell_triggered: bool = rule_engine.consume_expired_return_bell(damage >= player_hp and damage > 0)
+		player_hp = 1 if bell_triggered else maxi(0, player_hp - damage)
+		_log("《旧伤》在回合结束时造成 %d 点不可格挡伤害，你的生命 %d/%d。" % [damage, player_hp, player_max_hp])
+		_trigger_blank_epitaph(previous_hp)
+		if bell_triggered:
+			_log("过期返航铃触发：本次致命伤害后保留 1 点生命；立即执行裂解，本次裂解及之后的伤害仍可能致死。")
+			_resolve_fracture(false, "返航铃后续裂解")
+		else:
+			_check_player_defeat()
+		if battle_over:
+			return
 
 
 func draw_cards(amount: int, is_base_draw: bool = false) -> void:
@@ -793,7 +817,7 @@ func get_boss_deleted_summary() -> String:
 
 
 func get_boss_status_text() -> String:
-	var text: String = "REC-10 / 可覆写载体｜阶段%d·%s｜力量%d｜恢复%d｜删除：%s\n除名栏：%s" % [
+	var text: String = "REC-10 / 可覆写载体｜阶段%d·%s｜力量%d｜已完成恢复%d次｜删除：%s\n除名栏：%s" % [
 		boss_phase, get_boss_phase_name(), boss_strength, boss_recovery_count,
 		get_boss_deleted_summary(), get_boss_deleted_detail_text(),
 	]
@@ -812,7 +836,7 @@ func get_boss_terminal_options() -> Array[Dictionary]:
 		{
 			&"id": &"read_original", &"label": "读取被删原文",
 			&"enabled": can_choose_boss_original_text(),
-			&"reason": "" if can_choose_boss_original_text() else "需要本场战斗完成至少 2 次恢复（当前 %d/%d）" % [boss_recovery_count, BOSS_RECOVERY_REQUIRED],
+			&"reason": "" if can_choose_boss_original_text() else "需要本场战斗累计完成至少 2 次可计数恢复（费用、类别或关键词；当前 %d/%d）" % [boss_recovery_count, BOSS_RECOVERY_REQUIRED],
 		},
 	]
 
@@ -902,7 +926,7 @@ func _edit_boss_card_costs(amount: int) -> void:
 			&"order": _next_boss_edit_order(),
 			&"source": &"tamper_cost",
 		}
-		_log("篡改费用：《%s》费用由 %d 改为 %d；连续打出三种不同正式类别可恢复。" % [
+		_log("篡改费用：《%s》费用由 %d 改为 %d；连续打出三种不同类别可恢复。" % [
 			chosen.title, get_card_original_cost(chosen), get_card_cost(chosen),
 		])
 	if edit_count < amount:
@@ -1157,7 +1181,7 @@ func _start_player_turn() -> void:
 	_regenerate_stone_shell()
 	for message: String in rule_engine.advance_turn_statuses():
 		_log(message)
-	_log("—— 第 %d 回合：格挡清零，稳定度恢复至 %d ——" % [turn_number, energy])
+	_log("第 %d 回合：格挡清零，稳定度恢复至 %d。" % [turn_number, energy])
 	_resolve_sealed_cards()
 	if battle_over or boss_terminal_choice_pending:
 		return
@@ -1429,7 +1453,7 @@ func _deal_damage_to_player(base_amount: int, source_name: String) -> void:
 	])
 	_trigger_blank_epitaph(previous_hp)
 	if bell_triggered:
-		_log("过期返航铃触发：本次致命伤害后保留 1 生命；立即执行裂解，你可能仍被后续裂解杀死。")
+		_log("过期返航铃触发：本次致命伤害后保留 1 点生命；立即执行裂解，本次裂解及之后的伤害仍可能致死。")
 		_resolve_fracture(false, "返航铃后续裂解")
 	else:
 		_check_player_defeat()
@@ -1625,7 +1649,7 @@ func _resolve_fracture(consume_instability: bool, source_name: String) -> void:
 	_restore_earliest_boss_keyword_edit()
 	_trigger_blank_epitaph(previous_hp)
 	if bell_triggered:
-		_log("过期返航铃触发：致命裂解后保留 1 生命；立即执行额外裂解，你可能仍被后续裂解杀死。")
+		_log("过期返航铃触发：本次致命裂解后保留 1 点生命；立即执行额外裂解，本次额外裂解及之后的伤害仍可能致死。")
 		_resolve_fracture(false, "返航铃后续裂解")
 	else:
 		_check_player_defeat()

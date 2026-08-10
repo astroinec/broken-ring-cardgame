@@ -49,6 +49,12 @@ jobs:
       - name: Run responsive UI layout tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_ui_layout.gd'
 
+      - name: Run player-facing copy checks
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_copy.gd'
+
+      - name: Run keyboard accessibility checks
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_accessibility.gd'
+
       - name: Run map generation tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_map.gd'
 
@@ -81,6 +87,9 @@ jobs:
 
       - name: Run deterministic chapter simulation
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_chapter.gd'
+
+      - name: Run unassisted chapter balance audit
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_unassisted_chapter.gd'
 
       - name: Smoke-test main scene
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --quit-after 8'

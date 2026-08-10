@@ -576,7 +576,7 @@ func upgrade_card_instance(instance_id: int) -> bool:
 	var card_id: StringName = instance[&"card_id"] as StringName
 	var upgrade_id: StringName = CardUpgradeCatalog.get_default_upgrade_id(card_id)
 	if upgrade_id == &"":
-		last_action_error = "该卡牌没有M1升级"
+		last_action_error = "该卡牌没有可用升级"
 		return false
 	instance[&"upgrade_id"] = upgrade_id
 	deck_instances[index] = instance
@@ -731,7 +731,7 @@ func record_event_battle_victory() -> bool:
 	_settle_next_battle_relic_reward()
 	if not relics.has(&"wordless_bookplate"):
 		relics.append(&"wordless_bookplate")
-	event_outcome = "你拒绝交出定义。强化拾字虫独自承担了原本属于两只敌人的压力；胜利后获得遗物“无字藏书票”。"
+	event_outcome = "你拒绝交出定义。两份税契被压入一只强化拾字虫；胜利后获得遗物“无字藏书票”。"
 	_finish_event()
 	return true
 
@@ -1028,7 +1028,7 @@ func get_event_story(event_id: StringName = selected_event_id) -> String:
 		&"deleted_funeral":
 			return "一群没有面孔的人正在为你举行葬礼。墓碑日期是明天，碑面留着一块等待姓名的空白。"
 		&"definition_tax":
-			return "无字之城的收税者要求你交出一个仍属于自己的词。拒绝并不会召来第二只怪物：当前单敌人规则只能诚实地让一只强化拾字虫承担事件战。"
+			return "无字之城的收税者要求你交出一个仍属于自己的词。若你拒绝，两份税契会被压入一只强化拾字虫。"
 	return "事件记录缺失。"
 
 
@@ -1036,30 +1036,30 @@ func get_event_options(event_id: StringName = selected_event_id) -> Array[Dictio
 	var options: Array[Dictionary] = []
 	match event_id:
 		&"authorless_book":
-			options.append(_option("照书中写的做", "失去 6 生命；牌组加入《预写结局》。"))
+			options.append(_option("照书中写的做", "失去 6 生命，可能降至 0；牌组加入《预写结局》。"))
 			options.append(_option("撕掉下一页", "获得 60 墨晶；牌组加入 1 张《删节》。"))
-			options.append(_conditional_option("写下另一个名字", "获得证据“异名索引”。", relics.has(&"wordless_bookplate"), "需要遗物“无字藏书票”"))
+			options.append(_conditional_option("写下另一个名字", "获得证据“异名索引”；下一场战斗初始多抽 2 张牌。", relics.has(&"wordless_bookplate"), "需要遗物“无字藏书票”"))
 		&"seventh_dock":
-			options.append(_option("检查返航名单", "恢复 8 生命；获得证据“九份涂名返航记录”。"))
-			options.append(_option("敲响返航铃", "下一场战斗敌人力量 +2；胜利后获得遗物“过期返航铃”。"))
-			options.append(_conditional_option("盖上通行章", "获得证据“旧码头回收流程”。", relics.has(&"seventh_dock_stamp"), "需要遗物“第七码头通行章”"))
+			options.append(_option("检查返航名单", "恢复最多 8 生命；获得证据“九份涂名返航记录”。"))
+			options.append(_option("敲响返航铃", "下一场战斗敌人力量 +2；若获胜，获得遗物“过期返航铃”和证据“过期返航铃记录”。"))
+			options.append(_conditional_option("盖上通行章", "获得证据“旧码头回收流程”，不增加战斗代价。", relics.has(&"seventh_dock_stamp"), "需要遗物“第七码头通行章”"))
 		&"calibration_station":
-			options.append(_option("提交当前编号", "恢复 20 生命；下一场战斗初始获得 2 层律式缺名。"))
+			options.append(_option("提交当前编号", "恢复最多 20 生命；获得证据“重复校准参数”；下一场战斗初始获得 2 层律式缺名。"))
 			options.append(_option("提交上一名回收者编号", "获得 80 墨晶；获得证据“遮蔽资产日志”。"))
-			options.append(_option("拒绝校准", "最大生命减少 5；获得 1 张确定性随机罕见卡。"))
+			options.append(_option("拒绝校准", "最大生命减少 5，当前生命不超过新的上限；获得 1 张罕见卡。"))
 		&"speaking_for_you":
-			options.append(_option("继续对话", "固定种子升级 1 个具体未升级实例；下一场战斗不稳定阈值 -1。"))
-			options.append(_option("攻击墙后的人", "获得遗物“复读舌骨”；失去 8 生命。"))
-			options.append(_option("保持沉默", "进入实例选择；移除 1 张基础《校准击》或《临时护式》。"))
+			options.append(_option("继续对话", "随机升级 1 张可升级牌；下一场战斗不稳定阈值 -1。"))
+			options.append(_option("攻击墙后的人", "获得遗物“复读舌骨”；失去 8 生命，可能降至 0。"))
+			options.append(_option("保持沉默", "选择并移除 1 张基础《校准击》或《临时护式》。"))
 		&"deleted_funeral":
 			options.append(_option("参加自己的葬礼", "最大生命 +5；牌组加入 1 张《旧伤》。"))
-			options.append(_option("擦去墓碑", "进入实例选择；移除 1 张牌并失去 10 当前生命。"))
+			options.append(_option("擦去墓碑", "选择并移除 1 张牌；失去 10 当前生命，可能降至 0。"))
 			options.append(_conditional_option("询问死因", "获得证据“未发生的尸检”。", relics.has(&"blank_epitaph"), "需要遗物“空白墓志铭”"))
 		&"definition_tax":
-			options.append(_option("交出“疼痛”", "最大生命 -4；本次远征后续裂解伤害 8 → 5。"))
+			options.append(_option("交出“疼痛”", "最大生命减少 4，当前生命不超过新的上限；本次远征后续裂解伤害由 8 降至 5。"))
 			options.append(_option("交出“记忆”", "获得 120 墨晶；隐藏事件历史提示，但保留全部证据。"))
-			options.append(_option("交出“服从”", "固定种子获得 1 张罕见卡；终末机构关系 -1。"))
-			options.append(_option("拒绝定义", "进入强化拾字虫单敌人事件战；胜利获得“无字藏书票”。"))
+			options.append(_option("交出“服从”", "获得 1 张罕见卡；终末机构关系 -1。"))
+			options.append(_option("拒绝定义", "两份税契压入一只强化拾字虫；胜利后获得遗物“无字藏书票”。"))
 	return options
 
 
@@ -1128,14 +1128,14 @@ func apply_event_choice(choice_index: int, event_id: StringName = selected_event
 					if not upgrade_card_instance(instance_id):
 						return false
 					next_battle_instability_threshold_delta -= 1
-					event_outcome = "墙后的声音替你完成一句话。升级实例 #%d《%s》；下一场不稳定阈值 -1。" % [instance_id, CardCatalog.get_definition(chosen[&"card_id"] as StringName)[&"title"]]
+					event_outcome = "墙后的声音替你完成一句话。《%s》已升级；下一场不稳定阈值 -1。" % CardCatalog.get_definition(chosen[&"card_id"] as StringName)[&"title"]
 				1:
 					player_hp = maxi(0, player_hp - 8)
 					if not relics.has(&"echo_hyoid"):
 						relics.append(&"echo_hyoid")
 					event_outcome = "墙体碎裂，里面只有与你共振的骨骼。生命 -8，获得遗物“复读舌骨”。"
 				2:
-					_begin_event_selection(&"remove_basic", "选择 1 个基础攻击或防御实例移除。", _basic_removal_candidates())
+					_begin_event_selection(&"remove_basic", "选择 1 张基础攻击或防御牌移除。", _basic_removal_candidates())
 					return true
 		&"deleted_funeral":
 			match choice_index:
@@ -1144,7 +1144,7 @@ func apply_event_choice(choice_index: int, event_id: StringName = selected_event
 					_add_deck_card(&"old_wound", true)
 					event_outcome = "你参加了自己的葬礼。最大生命 +5，牌组加入《旧伤》。"
 				1:
-					_begin_event_selection(&"remove_any_lose_hp", "选择 1 个具体牌组实例移除；确认后失去 10 当前生命。", get_deck_instances())
+					_begin_event_selection(&"remove_any_lose_hp", "选择 1 张牌移除；确认后失去 10 当前生命，可能降至 0。", get_deck_instances())
 					return true
 				2:
 					_add_evidence(&"nonexistent_autopsy")
@@ -1168,7 +1168,7 @@ func apply_event_choice(choice_index: int, event_id: StringName = selected_event
 				3:
 					event_battle_pending = true
 					event_battle_reward_settled = false
-					event_outcome = "收税者退入文字背后。一只强化拾字虫进入单敌人事件战。"
+					event_outcome = "收税者退入文字背后，两份税契压入一只强化拾字虫。"
 					return true
 		_:
 			return false
@@ -1200,10 +1200,10 @@ func resolve_event_selection(instance_id: int) -> bool:
 	var kind: StringName = pending_event_selection[&"kind"] as StringName
 	pending_event_selection.clear()
 	if kind == &"remove_basic":
-		event_outcome = "你保持沉默，墙后也停止复述。已移除基础牌实例 #%d。" % instance_id
+		event_outcome = "你保持沉默，墙后也停止复述。选中的基础牌已移除。"
 	elif kind == &"remove_any_lose_hp":
 		player_hp = maxi(0, player_hp - 10)
-		event_outcome = "墓碑上的字连同牌组实例 #%d 一起消失。当前生命 -10。" % instance_id
+		event_outcome = "墓碑上的字连同选中的牌一起消失。当前生命 -10。"
 	else:
 		return false
 	_finish_event()
@@ -1219,8 +1219,8 @@ func cancel_event_selection() -> bool:
 
 
 func get_summary_text() -> String:
-	var summary: String = "固定种子 %d｜当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
-		seed_value, current_node, _completed_node_count(), deck_instances.size(), ink_crystals,
+	var summary: String = "当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
+		current_node, _completed_node_count(), deck_instances.size(), ink_crystals,
 		evidence.size(), player_hp, player_max_hp,
 	]
 	if run_completed:

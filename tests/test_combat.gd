@@ -25,6 +25,7 @@ func _init() -> void:
 	_test_hollow_name_guard()
 	_test_reverse_reader()
 	_test_binding_instrument()
+	_test_old_wound_end_turn_damage()
 	_test_no_temporary_simplification_logs()
 	if failures == 0:
 		print("PASS: all combat model checks")
@@ -745,6 +746,20 @@ func _test_binding_instrument() -> void:
 
 
 ## 战斗日志不得再出现“首版确定性简化”之类的临时说明。
+func _test_old_wound_end_turn_damage() -> void:
+	var model = CombatModelScript.new()
+	model.start_battle(73103, 6)
+	model.hand.clear()
+	model.player_hp = 20
+	model.player_block = 99
+	model.hand.append(CardCatalog.create_card(&"old_wound", 9001))
+	model.hand.append(CardCatalog.create_card(&"old_wound", 9002))
+	model._resolve_old_wounds_in_hand()
+	_expect(model.player_hp == 16, "each old wound deals two end-turn damage")
+	_expect(model.player_block == 99, "old wound damage bypasses block")
+	_expect(not model.battle_over, "nonlethal old wound damage keeps battle active")
+
+
 func _test_no_temporary_simplification_logs() -> void:
 	var forbidden: Array[String] = ["首版确定性简化", "首版", "确定性简化", "尚无选择器"]
 	var models: Array = []

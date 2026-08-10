@@ -2,7 +2,7 @@
 
 单人肉鸽牌组构筑游戏原型。Godot 4.7.x + typed GDScript，简体中文优先。
 
-当前处于 **v0.9 Demo硬化（M3进行中）**：v1战斗外存档/继续与8件遗物接线里程碑已完成，剩余真人试玩、中文/操作审校与导出。数值、机制与文本优先，美术与动画留到最后。
+当前处于 **v0.9 Demo硬化（M3进行中）**：存档/继续、8件遗物、界面安全余量、中文文案和键盘取消路径已完成自动审校；剩余真人完整试玩与macOS/Windows导出。数值、机制与文本优先，美术与动画留到最后。
 
 ## 快速开始
 
@@ -25,12 +25,15 @@ PROJECT=.
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_boss.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_events.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_relics.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_copy.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_accessibility.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_chinese_font.gd
 
 # 确定性模拟（战斗平衡、远征经济、Boss与完整章节）
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_balance.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_relics.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/sim_chapter.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/sim_unassisted_chapter.gd
 
 # 主场景冒烟
 "$GODOT" --headless --path "$PROJECT" --quit-after 8

@@ -181,7 +181,7 @@ const DEFINITIONS: Dictionary = {
 	&"reinforced_word_eater": {
 		&"name": "强化拾字虫", &"tier": "事件战", &"hp_min": 58, &"hp_max": 58,
 		&"traits": [EnemyDefinition.TRAIT_DEVOUR],
-		&"intro_line": "它只有一只。收税者把原本属于两只拾字虫的压力压进了同一副口器。",
+		&"intro_line": "两份税契被压进同一只强化拾字虫，墨迹在它的口器间反复咬合。",
 		&"intents": [
 			{
 				&"id": &"tax_gnaw", &"name": "税契啃噬", &"description": "造成 9 点伤害",
@@ -393,7 +393,7 @@ const DEFINITIONS: Dictionary = {
 		&"intents": [
 			{
 				&"id": &"tamper_cost", &"name": "篡改费用",
-				&"description": "从抽牌堆与弃牌堆选择 2 个不同实例，费用 +1；连续打出三种不同正式类别可恢复最早一项",
+				&"description": "从抽牌堆与弃牌堆选 2 张不同的非状态牌，费用 +1；连续打出三种不同类别可恢复最早一项",
 				&"operations": [
 					{&"kind": EnemyOperation.Kind.EDIT_CARD_COSTS, &"amount": 2},
 				],
@@ -422,7 +422,7 @@ const DEFINITIONS: Dictionary = {
 			},
 			{
 				&"id": &"delete_type", &"name": "删除类别",
-				&"description": "标记下次抽到的第一张非状态牌：进入手牌时失去类别；封存牌解封可恢复最早一项",
+				&"description": "下次抽到的第一张非状态牌进入手牌时失去类别；封存牌解封可恢复最早一项",
 				&"operations": [
 					{&"kind": EnemyOperation.Kind.MARK_NEXT_DRAW_TYPE_DELETION},
 				],
@@ -437,7 +437,7 @@ const DEFINITIONS: Dictionary = {
 			},
 			{
 				&"id": &"delete_keywords", &"name": "删除关键词",
-				&"description": "固定种子选择手牌中 1 张带关键词牌，禁用其关键词附加效果；裂解可恢复最早一项",
+				&"description": "回合结束时随机选择手牌中 1 张带关键词的牌，禁用其关键词效果；裂解可恢复最早一项",
 				&"operations": [
 					{&"kind": EnemyOperation.Kind.DELETE_HAND_KEYWORDS, &"amount": 1},
 				],
@@ -455,7 +455,7 @@ const DEFINITIONS: Dictionary = {
 	# ---------- 数值模拟专用敌人：不进入 PATH_ENEMY_IDS 或 TEST_ARENA_ENEMY_IDS ----------
 	&"pressure_archivist": {
 		&"name": "压力校勘体", &"tier": "测试", &"hp_min": 112, &"hp_max": 112,
-		&"intro_line": "仅用于固定种子数值校准。",
+		&"intro_line": "仅用于数值校准。",
 		&"intents": [
 			{
 				&"id": &"pressure_probe", &"name": "高压试探", &"description": "造成 9 点伤害",

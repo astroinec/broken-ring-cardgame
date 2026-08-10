@@ -59,7 +59,7 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"index_reorder": {
 		&"title": "索引重排", &"type": CardData.CardType.LAW, &"cost": 0,
-		&"description": "查看抽牌堆顶 3 张，将其中 1 张置入弃牌堆，其余任意排序。消逝。", &"rarity": "普通", &"exhausts": true,
+		&"description": "查看抽牌堆顶 3 张，选择 1 张置入弃牌堆，其余顺序不变。消逝。", &"rarity": "普通", &"exhausts": true,
 		&"flavor": "目录比正文多出一位作者。",
 	},
 	&"unsigned_support": {
@@ -74,8 +74,8 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"forced_stability": {
 		&"title": "强制稳定", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "不稳定减少 3；每实际减少 1 点，获得 2 点格挡。", &"rarity": "普通",
-		&"flavor": "校准不是治疗。它只是让错误暂时看起来正确。",
+		&"description": "移除最多 3 点不稳定；每实际移除 1 点，获得 2 点格挡。", &"rarity": "普通",
+		&"flavor": "校准不是治疗，只是暂时压住扩散的裂纹。",
 	},
 	&"critical_permission": {
 		&"title": "临界许可", &"type": CardData.CardType.LAW, &"cost": 1,
@@ -99,8 +99,8 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"prewritten_ending": {
 		&"title": "预写结局", &"type": CardData.CardType.LAW, &"cost": 2,
-		&"description": "选择手牌中 1 张非消逝牌的复制品封存 1；原牌本回合费用变为 0。消逝。", &"rarity": "罕见", &"exhausts": true,
-		&"flavor": "你不是第一次读到这个结局，只是第一次走到这里。",
+		&"description": "选择手牌中 1 张非消逝牌，生成其复制品并封存 1；原牌本回合费用变为 0。消逝。", &"rarity": "罕见", &"exhausts": true,
+		&"flavor": "结局早已写好，你只是把它提前翻到这一页。",
 	},
 	&"unseal_order": {
 		&"title": "开封令", &"type": CardData.CardType.LAW, &"cost": 1,
@@ -110,7 +110,7 @@ const DEFINITIONS: Dictionary = {
 	&"restate": {
 		&"title": "复述", &"type": CardData.CardType.LAW, &"cost": 1,
 		&"description": "回响上一张攻式的 60% 伤害。", &"rarity": "普通",
-		&"flavor": "第二个声音与第一个完全相同——包括那次颤抖。",
+		&"flavor": "第二个声音与第一个完全相同，连那次颤抖也没有遗漏。",
 	},
 	&"copied_guard": {
 		&"title": "复写护式", &"type": CardData.CardType.DEFENSE, &"cost": 1,
@@ -119,12 +119,12 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"homophone": {
 		&"title": "同音异义", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "复制紧邻上一张费用不高于 1 的非临时、非消逝牌；复制品消逝且本回合费用为 0。超载 1。", &"rarity": "罕见",
-		&"flavor": "他们叫你“载律者”。另一个纪元用这个词称呼死刑犯。",
+		&"description": "复制紧邻上一张费用不高于 1 的非临时、非消逝牌。复制品本回合费用为 0，打出后消逝。超载 1。", &"rarity": "罕见",
+		&"flavor": "此地称你为“载律者”，另一个纪元却用同样的读音称呼死刑犯。",
 	},
 	&"redaction": {
 		&"title": "删节", &"type": CardData.CardType.STATUS, &"cost": 99,
-		&"description": "不可打出。抽到时获得 1 层缺名；消逝。", &"rarity": "状态", &"exhausts": true,
+		&"description": "不可打出。抽到时立即获得 1 层律式缺名，然后消逝。", &"rarity": "状态", &"exhausts": true,
 		&"flavor": "此处内容从未存在。",
 	},
 	&"blank_page": {
@@ -134,7 +134,7 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"old_wound": {
 		&"title": "旧伤", &"type": CardData.CardType.STATUS, &"cost": 1,
-		&"description": "消逝。若回合结束时仍在手牌，受到 2 点伤害。", &"rarity": "状态", &"exhausts": true,
+		&"description": "消逝。若回合结束时仍在手牌，受到 2 点不可格挡伤害。", &"rarity": "状态", &"exhausts": true,
 		&"flavor": "这具身体的伤口，比这具身体更早登记。",
 	},
 }

@@ -224,6 +224,17 @@ func compute_fracture_damage(base: int, prevented: bool) -> int:
 	return result
 
 
+func compute_unblocked_status_damage(base: int) -> int:
+	last_trace.clear()
+	_trace(Phase.BASE, "基础状态伤害 %d" % base)
+	_trace(Phase.ATTACKER, "状态伤害不受攻击状态影响")
+	_trace(Phase.DEFENDER, "状态伤害不可被格挡")
+	_trace(Phase.RELIC, "无状态伤害类遗物修正")
+	var result: int = maxi(0, base)
+	_trace(Phase.CLAMP, "裁剪至不小于 0 → %d" % result)
+	return result
+
+
 ## 获得不稳定。裂纹稳定器在RELIC 阶段生效，每场战斗仅首次。
 func compute_instability_gain(base: int) -> int:
 	last_trace.clear()

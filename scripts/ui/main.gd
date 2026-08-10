@@ -72,6 +72,7 @@ func _create_page(heading: String, subtitle: String) -> VBoxContainer:
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page_root.add_child(header)
 	_add_page_title(header, heading, subtitle)
+	call_deferred("_focus_first_action")
 	return page_root
 
 
@@ -97,14 +98,74 @@ func _add_page_footer(page_root: VBoxContainer) -> HBoxContainer:
 	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_theme_constant_override("separation", 10)
 	page_root.add_child(footer)
+	var bottom_safety: Control = Control.new()
+	bottom_safety.name = "PageBottomSafety"
+	bottom_safety.custom_minimum_size = Vector2(0, 12)
+	page_root.add_child(bottom_safety)
 	return footer
 
 
 func _configure_button(button: Button, minimum_height: float = 44.0) -> Button:
 	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	button.focus_mode = Control.FOCUS_ALL
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.custom_minimum_size = Vector2(0, minimum_height)
 	return button
+
+
+func _focus_first_action() -> void:
+	if screen_root == null or not is_instance_valid(screen_root):
+		return
+	var buttons: Array[Button] = []
+	_collect_focusable_buttons(screen_root, buttons)
+	if buttons.is_empty():
+		return
+	for index: int in range(buttons.size()):
+		var previous: Button = buttons[posmod(index - 1, buttons.size())]
+		var next: Button = buttons[(index + 1) % buttons.size()]
+		buttons[index].focus_previous = buttons[index].get_path_to(previous)
+		buttons[index].focus_next = buttons[index].get_path_to(next)
+	buttons[0].grab_focus()
+
+
+func _collect_focusable_buttons(node: Node, result: Array[Button]) -> void:
+	if node is Button:
+		var button: Button = node as Button
+		if button.is_visible_in_tree() and not button.disabled and button.focus_mode != Control.FOCUS_NONE and not button.text.strip_edges().is_empty():
+			result.append(button)
+	for child: Node in node.get_children():
+		_collect_focusable_buttons(child, result)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo or event.keycode != KEY_ESCAPE:
+		return
+	match ui_mode:
+		&"combat":
+			if model != null and model.has_pending_selection():
+				_on_selection_cancelled()
+				get_viewport().set_input_as_handled()
+		&"event_selection":
+			_on_event_selection_cancelled()
+			get_viewport().set_input_as_handled()
+		&"deck", &"archive":
+			_show_map_screen()
+			get_viewport().set_input_as_handled()
+		&"shop_archive":
+			_show_shop_screen()
+			get_viewport().set_input_as_handled()
+		&"shop":
+			_on_shop_leave_pressed()
+			get_viewport().set_input_as_handled()
+		&"forge", &"rest_upgrade":
+			_on_upgrade_skipped(ui_mode)
+			get_viewport().set_input_as_handled()
+		&"rest":
+			_on_rest_skip_pressed()
+			get_viewport().set_input_as_handled()
+		&"map", &"test_menu", &"expedition_complete":
+			_show_main_menu()
+			get_viewport().set_input_as_handled()
 
 
 func _show_main_menu() -> void:
@@ -126,10 +187,12 @@ func _show_main_menu() -> void:
 		var save_status: Label = Label.new()
 		save_status.name = "SaveStatus"
 		if bool(save_info["valid"]):
-			save_status.text = "远征存档｜%s｜保存时间 Unix %d" % [save_info["summary"], save_info["saved_at_unix"]]
+			var saved_at: String = Time.get_datetime_string_from_unix_time(int(save_info["saved_at_unix"]), true)
+			save_status.text = "远征存档｜%s｜保存于 %s" % [save_info["summary"], saved_at]
 			save_status.add_theme_color_override("font_color", Color("a9bdd0"))
 		else:
-			save_status.text = "存档不可用：%s" % save_info["error"]
+			save_status.text = "存档不可用：已损坏或不兼容，可删除后开始新远征。"
+			save_status.tooltip_text = str(save_info["error"])
 			save_status.add_theme_color_override("font_color", Color("e58c95"))
 		save_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		save_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -255,7 +318,6 @@ func _show_map_screen() -> void:
 	_add_profile_stat(stats, "证据", "%d 条" % run_model.evidence.size())
 	_add_profile_stat(stats, "当前层", "%d / 9" % run_model.current_node)
 	_add_profile_stat(stats, "已完成节点", "%d 个" % _completed_node_count())
-	_add_profile_stat(stats, "固定种子", str(run_model.seed_value))
 	var relics: Label = Label.new()
 	relics.text = "遗物：%s" % _relic_names()
 	relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -265,7 +327,8 @@ func _show_map_screen() -> void:
 	if not last_save_error.is_empty():
 		var save_error: Label = Label.new()
 		save_error.name = "SaveError"
-		save_error.text = "检查点保存失败：%s" % last_save_error
+		save_error.text = "检查点保存失败，本次远征仍可继续。"
+		save_error.tooltip_text = last_save_error
 		save_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		save_error.add_theme_color_override("font_color", Color("e58c95"))
 		status_column.add_child(save_error)
@@ -318,8 +381,8 @@ func _show_deck_screen() -> void:
 	ui_mode = &"deck"
 	_clear_screen()
 	var deck_page: VBoxContainer = _create_page(
-		"牌组实例",
-		"共 %d 张；相同卡牌的每个实例独立保存升级状态。" % run_model.deck_instances.size()
+		"当前牌组",
+		"共 %d 张；每张同名牌都独立保存升级状态。" % run_model.deck_instances.size()
 	)
 	var list: VBoxContainer = _add_page_scroll(deck_page, "DeckList")
 	for instance: Dictionary in run_model.deck_instances:
@@ -537,7 +600,7 @@ func _show_shop_screen() -> void:
 	var remove_reason: String = shop.remove_unavailable_reason(run_model)
 	var remove_price: int = shop.get_remove_price(run_model)
 	var remove_label: Label = Label.new()
-	remove_label.text = "移除服务｜%d 墨晶%s%s\n选择一个具体实例；长牌组可在此区域继续向下滚动。" % [
+	remove_label.text = "移除服务｜%d 墨晶%s%s\n选择 1 张牌移除；长牌组可在此区域继续向下滚动。" % [
 		remove_price,
 		"（通行章已减免 25）" if run_model.relics.has(&"seventh_dock_stamp") else "",
 		"｜不可用：%s" % remove_reason if not remove_reason.is_empty() else "",
@@ -615,12 +678,12 @@ func _show_upgrade_screen(mode: StringName) -> void:
 	var candidates: Array[Dictionary] = run_model.get_unupgraded_instances()
 	var upgrade_page: VBoxContainer = _create_page(
 		"锻造" if mode == &"forge" else "休整：升级",
-		"选择具体未升级实例；共 %d 个候选，每次只升级一张。" % candidates.size()
+		"选择 1 张未升级牌；当前有 %d 张可选。" % candidates.size()
 	)
 	var list: VBoxContainer = _add_page_scroll(upgrade_page, "UpgradeList")
 	if candidates.is_empty():
 		var empty: Label = Label.new()
-		empty.text = "牌组中没有可升级实例。"
+		empty.text = "牌组中没有可升级的牌。"
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		list.add_child(empty)
 	for instance: Dictionary in candidates:
@@ -665,9 +728,9 @@ func _show_rest_screen() -> void:
 	heal.pressed.connect(_on_rest_heal_pressed)
 	options.add_child(heal)
 	var upgrade: Button = _configure_button(Button.new(), 64)
-	upgrade.text = "升级一张未升级牌%s" % ("｜不可用：没有可升级实例" if run_model.get_unupgraded_instances().is_empty() else "")
+	upgrade.text = "升级一张未升级牌%s" % ("｜不可用：没有可升级的牌" if run_model.get_unupgraded_instances().is_empty() else "")
 	upgrade.disabled = run_model.get_unupgraded_instances().is_empty()
-	upgrade.tooltip_text = "没有可升级实例" if upgrade.disabled else ""
+	upgrade.tooltip_text = "牌组中没有可升级的牌" if upgrade.disabled else ""
 	upgrade.pressed.connect(_show_rest_upgrade_screen)
 	options.add_child(upgrade)
 	var salvage: Button = _configure_button(Button.new(), 64)
@@ -701,7 +764,7 @@ func _show_boss_terminal_screen() -> void:
 	_clear_screen()
 	var terminal_page: VBoxContainer = _create_page(
 		"未完成的删除",
-		"删名者生命锁定为 1，已经从伤害目标中移除。选择将由战斗规则层校验。"
+		"删名者生命锁定为 1，已无法继续攻击。请选择如何处理定义律印。"
 	)
 	var content: VBoxContainer = _add_page_scroll(terminal_page, "BossTerminalContent")
 	var record: Label = Label.new()
@@ -723,7 +786,7 @@ func _show_boss_terminal_screen() -> void:
 		content.add_child(option_button)
 	var footer: HBoxContainer = _add_page_footer(terminal_page)
 	var condition: Label = Label.new()
-	condition.text = "读取被删原文条件：实际恢复 %d/%d。选择后结束本次远征。" % [
+	condition.text = "读取被删原文条件：累计完成 2 次可计数恢复（费用、类别或关键词），当前 %d/%d。回响降力不计入。" % [
 		model.boss_recovery_count, CombatModel.BOSS_RECOVERY_REQUIRED,
 	]
 	condition.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -869,8 +932,8 @@ func _build_combat_screen() -> void:
 	page.name = "CombatPage"
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	# Boss的长意图和遗物HUD会共同占用纵向空间；保持紧凑，确保720逻辑视口内底部操作始终可见。
-	page.add_theme_constant_override("separation", 4)
+	# 首领的长意图、遗物HUD与长手牌同时出现时仍需保留额外纵向余量。
+	page.add_theme_constant_override("separation", 2)
 	screen_root.add_child(page)
 
 	var header: HBoxContainer = HBoxContainer.new()
@@ -885,7 +948,7 @@ func _build_combat_screen() -> void:
 	header.add_child(title)
 	var stage_label: Label = Label.new()
 	stage_label.text = "独立测试 / 不计入远征" if is_test_mode else (
-		"第9层｜正式Boss战" if model.is_name_eraser_battle() else model.get_stage_progress_text()
+		"第9层｜删名者首领战" if model.is_name_eraser_battle() else model.get_stage_progress_text()
 	)
 	stage_label.add_theme_font_size_override("font_size", 20)
 	stage_label.add_theme_color_override("font_color", Color("ffd27d"))
@@ -905,7 +968,7 @@ func _build_combat_screen() -> void:
 	var relic_hud: RichTextLabel = RichTextLabel.new()
 	relic_hud.name = "RelicHUD"
 	relic_hud.text = model.get_relic_hud_text()
-	relic_hud.custom_minimum_size = Vector2(0, 34)
+	relic_hud.custom_minimum_size = Vector2(0, 26)
 	relic_hud.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	relic_hud.scroll_active = true
 	relic_hud.add_theme_font_size_override("normal_font_size", 14)
@@ -928,18 +991,25 @@ func _build_combat_screen() -> void:
 	_add_stat(stats, "远征", "牌%d 墨晶%d" % [run_model.deck_instances.size(), run_model.ink_crystals])
 
 	var middle: HBoxContainer = HBoxContainer.new()
+	middle.custom_minimum_size = Vector2(0, 158)
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	middle.add_theme_constant_override("separation", 12)
+	middle.add_theme_constant_override("separation", 10)
 	page.add_child(middle)
 	var enemy_panel: PanelContainer = PanelContainer.new()
-	enemy_panel.custom_minimum_size = Vector2(430, 185)
+	enemy_panel.custom_minimum_size = Vector2(430, 158)
 	enemy_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	enemy_panel.add_theme_stylebox_override("panel", _panel_style(Color("291b24"), Color("8c5367"), 12))
 	middle.add_child(enemy_panel)
+	var enemy_scroll: ScrollContainer = ScrollContainer.new()
+	enemy_scroll.name = "EnemyIntentScroll"
+	enemy_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	enemy_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	enemy_panel.add_child(enemy_scroll)
 	var enemy_column: VBoxContainer = VBoxContainer.new()
+	enemy_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	enemy_column.alignment = BoxContainer.ALIGNMENT_CENTER
-	enemy_column.add_theme_constant_override("separation", 9)
-	enemy_panel.add_child(enemy_column)
+	enemy_column.add_theme_constant_override("separation", 5)
+	enemy_scroll.add_child(enemy_column)
 	_add_centered(enemy_column, model.enemy_name, 28, Color("f2bdc8"))
 	_add_centered(
 		enemy_column,
@@ -952,10 +1022,10 @@ func _build_combat_screen() -> void:
 	elif model.is_mechanic_unlocked(&"missing_name"):
 		_add_centered(enemy_column, "%s｜%s" % [model.get_enemy_record_text(), model.get_missing_name_text()], 16, Color("e0a9ba"))
 	if model.is_mechanic_unlocked(&"intent"):
-		_add_centered(enemy_column, "下一意图 / %s" % model.get_enemy_intent_text(), 20, Color("ffd27d"))
+		_add_centered(enemy_column, "下一意图：%s" % model.get_enemy_intent_text(), 18, Color("ffd27d"))
 
 	var info_panel: PanelContainer = PanelContainer.new()
-	info_panel.custom_minimum_size = Vector2(560, 185)
+	info_panel.custom_minimum_size = Vector2(560, 158)
 	info_panel.add_theme_stylebox_override("panel", _panel_style(Color("151e29"), Color("33485f"), 8))
 	middle.add_child(info_panel)
 	var info_column: VBoxContainer = VBoxContainer.new()
@@ -985,7 +1055,7 @@ func _build_combat_screen() -> void:
 
 	var hand_scroll: ScrollContainer = ScrollContainer.new()
 	hand_scroll.name = "CombatHandScroll"
-	hand_scroll.custom_minimum_size = Vector2(0, 145)
+	hand_scroll.custom_minimum_size = Vector2(0, 132)
 	hand_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	hand_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	page.add_child(hand_scroll)
@@ -1002,7 +1072,7 @@ func _build_combat_screen() -> void:
 	result_label.add_theme_color_override("font_color", Color("9cafc2"))
 	footer.add_child(result_label)
 	var restart_button: Button = _configure_button(Button.new())
-	restart_button.text = "返回标题" if is_test_mode else "重新开始远征"
+	restart_button.text = "返回标题" if is_test_mode else "放弃当前远征并重开（覆盖存档）"
 	restart_button.pressed.connect(_on_restart_pressed)
 	footer.add_child(restart_button)
 	result_action_button = _configure_button(Button.new())
@@ -1014,6 +1084,7 @@ func _build_combat_screen() -> void:
 	end_turn_button.text = "结束回合"
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	footer.add_child(end_turn_button)
+	call_deferred("_focus_first_action")
 
 
 func _refresh_combat() -> void:
@@ -1032,6 +1103,12 @@ func _refresh_combat() -> void:
 		joined_log += entry + "\n"
 	log_view.text = joined_log
 	end_turn_button.disabled = model.battle_over or model.has_pending_selection()
+	if model.battle_over:
+		end_turn_button.tooltip_text = "战斗已经结束"
+	elif model.has_pending_selection():
+		end_turn_button.tooltip_text = "请先确认或取消当前选择"
+	else:
+		end_turn_button.tooltip_text = ""
 	if model.has_pending_selection():
 		result_action_button.visible = false
 		result_label.text = "选择模式｜%s（可取消）" % model.get_pending_prompt()
@@ -1051,9 +1128,9 @@ func _refresh_combat() -> void:
 		if not _has_playable_hand_card():
 			result_label.text = "无可打出的牌｜请结束回合"
 			result_label.add_theme_color_override("font_color", Color("ffd27d"))
-			end_turn_button.text = "结束回合（恢复3稳定度）"
+			end_turn_button.text = "结束回合（恢复 3 点稳定度）"
 		else:
-			result_label.text = "第%d回合｜每回合3稳定度" % model.turn_number
+			result_label.text = "第%d回合｜每回合恢复 3 点稳定度" % model.turn_number
 			result_label.add_theme_color_override("font_color", Color("9cafc2"))
 			end_turn_button.text = "结束回合"
 
@@ -1070,9 +1147,10 @@ func _build_hand_row() -> void:
 	for index: int in range(model.hand.size()):
 		var card: CardData = model.hand[index]
 		var button: Button = Button.new()
+		button.focus_mode = Control.FOCUS_ALL
 		var cost: int = model.get_card_cost(card)
 		var unplayable: bool = card.card_type == CardData.CardType.STATUS and card.base_cost >= 99
-		button.custom_minimum_size = Vector2(220 if model.is_name_eraser_battle() else 184, 150 if model.is_name_eraser_battle() else 135)
+		button.custom_minimum_size = Vector2(220 if model.is_name_eraser_battle() else 184, 136 if model.is_name_eraser_battle() else 132)
 		var cost_text: String = "不可打出" if unplayable else model.get_card_cost_display(card)
 		button.text = "%s
 %s｜%s｜%s
@@ -1085,7 +1163,9 @@ func _build_hand_row() -> void:
 		if not recovery_text.is_empty():
 			button.text += "\n%s" % recovery_text
 		var unavailable_reason: String = ""
-		if unplayable:
+		if model.battle_over:
+			unavailable_reason = "战斗已经结束"
+		elif unplayable:
 			unavailable_reason = "状态牌不可主动打出"
 		elif cost > model.energy:
 			unavailable_reason = "稳定度不足：需要%d，当前%d" % [cost, model.energy]
@@ -1112,7 +1192,8 @@ func _build_selection_row() -> void:
 	var candidate_labels: Array[String] = model.get_pending_candidate_labels()
 	for slot: int in range(candidate_indices.size()):
 		var button: Button = Button.new()
-		button.custom_minimum_size = Vector2(184, 135)
+		button.focus_mode = Control.FOCUS_ALL
+		button.custom_minimum_size = Vector2(184, 132)
 		button.text = "选择
 %s" % candidate_labels[slot]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1122,7 +1203,8 @@ func _build_selection_row() -> void:
 		button.pressed.connect(_on_selection_confirmed.bind(candidate_indices[slot]))
 		hand_box.add_child(button)
 	var cancel: Button = Button.new()
-	cancel.custom_minimum_size = Vector2(184, 135)
+	cancel.focus_mode = Control.FOCUS_ALL
+	cancel.custom_minimum_size = Vector2(184, 132)
 	cancel.text = "取消
 
 该牌不结算，返还稳定度并放回手牌。"
@@ -1217,7 +1299,7 @@ func _show_reward_screen() -> void:
 		var card_id: StringName = run_model.pending_reward_ids[index]
 		var definition: Dictionary = CardCatalog.get_definition(card_id)
 		var button: Button = _configure_button(Button.new(), 132)
-		button.text = "%s｜%s｜%s｜费用 %d\n%s\n—— %s" % [
+		button.text = "%s｜%s｜%s｜费用 %d\n%s\n风味：%s" % [
 			definition[&"title"], CardData.type_display_name(int(definition[&"type"])), definition[&"rarity"],
 			definition[&"cost"], definition[&"description"], definition[&"flavor"],
 		]
@@ -1327,7 +1409,7 @@ func _show_event_selection_screen() -> void:
 	ui_mode = &"event_selection"
 	_clear_screen()
 	var selection: Dictionary = run_model.get_pending_event_selection()
-	var selection_page: VBoxContainer = _create_page("事件实例选择", str(selection.get(&"prompt", "选择一个具体牌组实例。")))
+	var selection_page: VBoxContainer = _create_page("选择一张牌", str(selection.get(&"prompt", "选择一张牌。")))
 	var list: VBoxContainer = _add_page_scroll(selection_page, "EventSelectionList")
 	for instance: Dictionary in run_model.get_pending_event_candidates():
 		var button: Button = _configure_button(Button.new(), 72)
