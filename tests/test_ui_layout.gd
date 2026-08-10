@@ -9,10 +9,21 @@ func _init() -> void:
 
 
 func _run() -> void:
+	var save_path: String = "user://broken_ring_ui_layout_test_%d.json" % OS.get_process_id()
+	var save_manager: SaveManager = SaveManager.new(save_path)
+	save_manager.delete()
 	main = (load("res://scenes/main.tscn") as PackedScene).instantiate()
+	main.save_manager = save_manager
 	root.add_child(main)
 	await process_frame
 	main._restart_run()
+	await process_frame
+	main._show_main_menu()
+	await process_frame
+	_check_current_page("valid save menu", false, false)
+	_expect(_find_button_with_text(main.screen_root, "继续远征") != null, "有效存档菜单保留继续按钮")
+	_expect(_tree_contains_text(main.screen_root, "远征存档"), "有效存档菜单摘要可见")
+	main._continue_run()
 	await process_frame
 
 	_check_current_page("map", true, true)
@@ -112,6 +123,17 @@ func _run() -> void:
 	_expect(main.page != null, "combat page exists")
 	_expect(main.screen_root.size.x <= 1280.0, "combat does not widen root beyond logical viewport")
 	_expect(main.page.get_combined_minimum_size().x <= 1240.0, "combat layout minimum width fits viewport")
+
+	var corrupt_file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
+	corrupt_file.store_string("{broken save")
+	corrupt_file.close()
+	main._show_main_menu()
+	await process_frame
+	_check_current_page("corrupt save menu", false, false)
+	_expect(_tree_contains_text(main.screen_root, "存档不可用"), "损坏存档原因在紧凑标题页可见")
+	_expect(_find_button_with_text(main.screen_root, "删除损坏存档") != null, "损坏存档删除操作在标题页可见")
+	_expect(_find_button_with_text(main.screen_root, "开始新远征") != null, "损坏存档下新游戏操作仍可见")
+	save_manager.delete()
 
 	main.queue_free()
 	if failures == 0:

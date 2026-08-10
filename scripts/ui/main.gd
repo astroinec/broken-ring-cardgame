@@ -3,9 +3,12 @@ extends Control
 
 const CombatModelScript: Script = preload("res://scripts/core/combat_model.gd")
 const RunModelScript: Script = preload("res://scripts/core/run_model.gd")
+const SaveManagerScript: Script = preload("res://scripts/core/save_manager.gd")
 
 var model: CombatModel
 var run_model: RunModel
+var save_manager: SaveManager = SaveManagerScript.new()
+var last_save_error: String = ""
 var current_stage: int = CombatModel.TUTORIAL_STAGE_MIN
 var is_test_mode: bool = false
 var ui_mode: StringName = &"menu"
@@ -118,10 +121,37 @@ func _show_main_menu() -> void:
 	premise.add_theme_font_size_override("font_size", 21)
 	premise.add_theme_color_override("font_color", Color("d8e0e7"))
 	menu.add_child(premise)
+	var save_info: Dictionary = save_manager.inspect()
+	if bool(save_info["exists"]):
+		var save_status: Label = Label.new()
+		save_status.name = "SaveStatus"
+		if bool(save_info["valid"]):
+			save_status.text = "远征存档｜%s｜保存时间 Unix %d" % [save_info["summary"], save_info["saved_at_unix"]]
+			save_status.add_theme_color_override("font_color", Color("a9bdd0"))
+		else:
+			save_status.text = "存档不可用：%s" % save_info["error"]
+			save_status.add_theme_color_override("font_color", Color("e58c95"))
+		save_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		save_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		save_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		menu.add_child(save_status)
+		if bool(save_info["valid"]):
+			var continue_button: Button = _configure_button(Button.new(), 58)
+			continue_button.name = "ContinueRun"
+			continue_button.text = "继续远征"
+			continue_button.pressed.connect(_continue_run)
+			menu.add_child(continue_button)
 	var start_button: Button = _configure_button(Button.new(), 62)
-	start_button.text = "进入无字之城"
+	start_button.name = "StartRun"
+	start_button.text = "开始新远征（覆盖旧存档）" if bool(save_info["exists"]) else "进入无字之城"
 	start_button.pressed.connect(_restart_run)
 	menu.add_child(start_button)
+	if bool(save_info["exists"]):
+		var delete_button: Button = _configure_button(Button.new(), 48)
+		delete_button.name = "DeleteSave"
+		delete_button.text = "删除存档" if bool(save_info["valid"]) else "删除损坏存档"
+		delete_button.pressed.connect(_delete_save_and_refresh)
+		menu.add_child(delete_button)
 	var test_button: Button = _configure_button(Button.new(), 52)
 	test_button.text = "机制测试场"
 	test_button.tooltip_text = "独立于主线，集中体验当前已实现的核心牌组机制。"
@@ -141,7 +171,66 @@ func _restart_run() -> void:
 	run_model = RunModelScript.new()
 	run_model.start_run(RunModel.DEFAULT_SEED)
 	current_stage = CombatModel.TUTORIAL_STAGE_MIN
+	_save_checkpoint()
 	_show_map_screen()
+
+
+func _continue_run() -> void:
+	var loaded_run: RunModel = RunModelScript.new()
+	if not save_manager.load_run(loaded_run):
+		last_save_error = save_manager.last_error
+		_show_main_menu()
+		return
+	run_model = loaded_run
+	is_test_mode = false
+	current_stage = clampi(run_model.current_node, CombatModel.TUTORIAL_STAGE_MIN, CombatModel.TUTORIAL_STAGE_MAX)
+	last_save_error = ""
+	_show_map_screen()
+
+
+func _delete_save_and_refresh() -> void:
+	if not save_manager.delete():
+		last_save_error = save_manager.last_error
+	else:
+		last_save_error = ""
+	_show_main_menu()
+
+
+func _save_checkpoint() -> bool:
+	if save_manager.save_run(run_model):
+		last_save_error = ""
+		return true
+	last_save_error = save_manager.last_error
+	push_warning("远征检查点保存失败：%s" % last_save_error)
+	return false
+
+
+func _complete_current_node_checkpoint() -> bool:
+	if not run_model.complete_current_node():
+		return false
+	if run_model.run_completed:
+		if not save_manager.delete():
+			last_save_error = save_manager.last_error
+			push_warning("Boss结算后删除存档失败：%s" % last_save_error)
+		else:
+			last_save_error = ""
+	else:
+		_save_checkpoint()
+	return true
+
+
+func _complete_node_and_return_to_map() -> bool:
+	if not _complete_current_node_checkpoint():
+		return false
+	_show_map_screen()
+	return true
+
+
+func _complete_node_and_show_summary() -> bool:
+	if not _complete_current_node_checkpoint():
+		return false
+	_show_summary_screen()
+	return true
 
 
 func _show_map_screen() -> void:
@@ -173,6 +262,13 @@ func _show_map_screen() -> void:
 	relics.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	relics.add_theme_color_override("font_color", Color("d8e0e7"))
 	status_column.add_child(relics)
+	if not last_save_error.is_empty():
+		var save_error: Label = Label.new()
+		save_error.name = "SaveError"
+		save_error.text = "检查点保存失败：%s" % last_save_error
+		save_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		save_error.add_theme_color_override("font_color", Color("e58c95"))
+		status_column.add_child(save_error)
 	var archive_actions: HBoxContainer = HBoxContainer.new()
 	archive_actions.add_theme_constant_override("separation", 8)
 	status_column.add_child(archive_actions)
@@ -432,8 +528,8 @@ func _on_shop_remove_pressed(instance_id: int) -> void:
 
 
 func _on_shop_leave_pressed() -> void:
-	if run_model.finish_shop() and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.finish_shop():
+		_complete_node_and_return_to_map()
 
 
 func _show_forge_screen() -> void:
@@ -476,14 +572,14 @@ func _show_upgrade_screen(mode: StringName) -> void:
 
 func _on_upgrade_instance_pressed(instance_id: int, mode: StringName) -> void:
 	var resolved: bool = run_model.resolve_forge_upgrade(instance_id) if mode == &"forge" else run_model.resolve_rest_upgrade(instance_id)
-	if resolved and run_model.complete_current_node():
-		_show_map_screen()
+	if resolved:
+		_complete_node_and_return_to_map()
 
 
 func _on_upgrade_skipped(mode: StringName) -> void:
 	var resolved: bool = run_model.skip_forge() if mode == &"forge" else run_model.skip_rest()
-	if resolved and run_model.complete_current_node():
-		_show_map_screen()
+	if resolved:
+		_complete_node_and_return_to_map()
 
 
 func _show_rest_screen() -> void:
@@ -517,18 +613,18 @@ func _show_rest_screen() -> void:
 
 
 func _on_rest_heal_pressed() -> void:
-	if run_model.resolve_rest_heal() and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.resolve_rest_heal():
+		_complete_node_and_return_to_map()
 
 
 func _on_rest_salvage_pressed() -> void:
-	if run_model.resolve_rest_salvage() and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.resolve_rest_salvage():
+		_complete_node_and_return_to_map()
 
 
 func _on_rest_skip_pressed() -> void:
-	if run_model.skip_rest() and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.skip_rest():
+		_complete_node_and_return_to_map()
 
 
 func _show_boss_terminal_screen() -> void:
@@ -575,7 +671,7 @@ func _on_boss_terminal_choice(option_id: StringName) -> void:
 		_show_main_menu()
 		return
 	run_model.player_hp = model.player_hp
-	if run_model.record_boss_outcome(model.boss_terminal_choice, model.boss_recovery_count) and run_model.complete_current_node():
+	if run_model.record_boss_outcome(model.boss_terminal_choice, model.boss_recovery_count) and _complete_current_node_checkpoint():
 		_show_expedition_complete_screen()
 
 
@@ -966,8 +1062,8 @@ func _on_battle_result_pressed() -> void:
 		return
 	run_model.player_hp = model.player_hp
 	if run_model.is_event_battle_pending():
-		if run_model.record_event_battle_victory() and run_model.complete_current_node():
-			_show_summary_screen()
+		if run_model.record_event_battle_victory():
+			_complete_node_and_show_summary()
 		return
 	run_model.record_battle_victory(current_stage)
 	if run_model.should_offer_reward(current_stage):
@@ -975,8 +1071,7 @@ func _on_battle_result_pressed() -> void:
 		_show_reward_screen()
 	else:
 		run_model.mark_current_node_resolved()
-		run_model.complete_current_node()
-		_show_map_screen()
+		_complete_node_and_return_to_map()
 
 
 func _show_reward_screen() -> void:
@@ -1007,13 +1102,13 @@ func _show_reward_screen() -> void:
 
 
 func _on_reward_chosen(index: int) -> void:
-	if run_model.choose_reward(index) and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.choose_reward(index):
+		_complete_node_and_return_to_map()
 
 
 func _on_reward_skipped() -> void:
-	if run_model.skip_reward() and run_model.complete_current_node():
-		_show_map_screen()
+	if run_model.skip_reward():
+		_complete_node_and_return_to_map()
 
 
 func _advance_after_interlude() -> void:
@@ -1118,8 +1213,8 @@ func _show_event_selection_screen() -> void:
 
 
 func _on_event_selection_confirmed(instance_id: int) -> void:
-	if run_model.resolve_event_selection(instance_id) and run_model.complete_current_node():
-		_show_summary_screen()
+	if run_model.resolve_event_selection(instance_id):
+		_complete_node_and_show_summary()
 
 
 func _on_event_selection_cancelled() -> void:
@@ -1134,8 +1229,8 @@ func _on_event_choice(index: int) -> void:
 		_show_event_selection_screen()
 	elif run_model.is_event_battle_pending():
 		_start_current_battle()
-	elif run_model.event_resolved and run_model.complete_current_node():
-		_show_summary_screen()
+	elif run_model.event_resolved:
+		_complete_node_and_show_summary()
 
 
 func _show_summary_screen() -> void:

@@ -8,14 +8,19 @@ func _init() -> void:
 
 
 func _run() -> void:
+	var save_path: String = "user://broken_ring_flow_test_%d.json" % OS.get_process_id()
+	var save_manager: SaveManager = SaveManager.new(save_path)
+	save_manager.delete()
 	_expect(int(ProjectSettings.get_setting("display/window/size/window_width_override")) <= 960, "default window fits compact desktop width")
 	_expect(int(ProjectSettings.get_setting("display/window/size/window_height_override")) <= 540, "default window fits compact desktop height")
 	_expect(str(ProjectSettings.get_setting("display/window/stretch/aspect")) == "keep", "window resizing preserves 16:9 viewport aspect")
 	var scene: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var main = scene.instantiate()
+	main.save_manager = save_manager
 	root.add_child(main)
 	await process_frame
 	_expect(main.screen_root.get_child_count() == 1, "main menu is shown on startup")
+	_expect(_find_button_with_text(main.screen_root, "继续远征") == null, "无存档时标题页不显示继续")
 	main._start_test_level()
 	await process_frame
 	_expect(main.is_test_mode, "test level uses independent mode")
@@ -27,6 +32,15 @@ func _run() -> void:
 	await process_frame
 	_expect(not main.is_test_mode, "main route is separate from test mode")
 	_expect(main.current_stage == CombatModel.TUTORIAL_STAGE_MIN, "main route begins at first path node")
+	_expect(FileAccess.file_exists(save_path), "开始新远征立即写入战斗外检查点")
+	main._show_main_menu()
+	await process_frame
+	_expect(_find_button_with_text(main.screen_root, "继续远征") != null, "有效存档在标题页显示继续远征")
+	_expect(_tree_contains_text(main.screen_root, "固定种子 73103"), "有效存档在标题页显示摘要")
+	main.run_model.player_hp = 1
+	main._continue_run()
+	await process_frame
+	_expect(main.ui_mode == &"map" and main.run_model.player_hp == 70, "继续远征加载存档并回到地图")
 	for stage: int in range(1, CombatModel.TUTORIAL_STAGE_MAX + 1):
 		var model: CombatModel = CombatModel.new()
 		model.start_battle(73103, stage)
@@ -85,6 +99,18 @@ func _run() -> void:
 	main._on_selection_confirmed(candidates[0])
 	await process_frame
 	_expect(not main.model.has_pending_selection(), "confirming a target exits selection mode")
+
+	var corrupt_file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
+	corrupt_file.store_string("{broken save")
+	corrupt_file.close()
+	main._show_main_menu()
+	await process_frame
+	_expect(_tree_contains_text(main.screen_root, "存档不可用"), "损坏存档在标题页显示原因")
+	_expect(_find_button_with_text(main.screen_root, "删除损坏存档") != null, "损坏存档标题页显示删除按钮")
+	_expect(_find_button_with_text(main.screen_root, "开始新远征") != null, "损坏存档不阻止新游戏")
+	main._delete_save_and_refresh()
+	await process_frame
+	_expect(not FileAccess.file_exists(save_path), "标题页可删除损坏存档")
 
 	main.queue_free()
 	if failures == 0:
@@ -204,6 +230,7 @@ func _test_expedition_ui(main) -> void:
 	main._on_boss_terminal_choice(&"read_original")
 	await process_frame
 	_expect(main.ui_mode == &"expedition_complete", "Boss terminal choice reaches the expedition settlement")
+	_expect(not FileAccess.file_exists(main.save_manager.save_path), "Boss结算后删除远征存档")
 	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "formal Boss can only be completed once through the node protocol")
 	_expect(main.run_model.evidence.has("第十份校准记录"), "hidden Boss ending reaches RunModel evidence")
 
@@ -258,6 +285,16 @@ func _test_event_selection_and_event_battle_ui(main) -> void:
 	await process_frame
 	_expect(_tree_contains_text(main.screen_root, "来源：随机事件：校准站"), "archive renders structured evidence source")
 	_expect(_tree_contains_text(main.screen_root, "可替换资产"), "archive renders structured evidence description")
+
+
+func _find_button_with_text(node: Node, fragment: String) -> Button:
+	if node is Button and (node as Button).text.contains(fragment):
+		return node as Button
+	for child: Node in node.get_children():
+		var found: Button = _find_button_with_text(child, fragment)
+		if found != null:
+			return found
+	return null
 
 
 func _tree_contains_text(node: Node, fragment: String) -> bool:

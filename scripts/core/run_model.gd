@@ -17,6 +17,20 @@ const STARTING_RELIC_IDS: Array[StringName] = [&"crack_stabilizer"]
 const NORMAL_BATTLE_INCOME: int = 12
 const ELITE_BATTLE_INCOME: int = 30
 const REST_SALVAGE_INCOME: int = 30
+const MAX_SAVE_HP: int = 999
+const MAX_SAVE_INK: int = 1_000_000
+const MAX_SAVE_COUNTER: int = 1_000_000
+const MAX_SAVE_INSTANCE_ID: int = 2_147_483_647
+const SAVE_FIELDS: Array[String] = [
+	"seed_value", "current_node_id", "visited_node_ids", "available_node_ids", "current_node",
+	"player_hp", "player_max_hp", "ink_crystals", "deck_instances", "next_deck_instance_id",
+	"acquired_card_ids", "relics", "evidence_records", "completed_node_ids", "revealed_node_ids",
+	"reward_round", "shop_remove_count", "next_battle_missing_name",
+	"next_battle_instability_threshold_delta", "next_battle_enemy_strength",
+	"next_battle_initial_draw_bonus", "next_battle_reward_relic_id", "fracture_damage_override",
+	"institution_relation", "event_history_hints_hidden", "event_history", "completed_battles",
+	"boss_ending_id", "boss_ending_text", "run_completed",
+]
 
 var schema_version: int = SCHEMA_VERSION
 var seed_value: int = DEFAULT_SEED
@@ -113,6 +127,377 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 		relics.append(relic_id)
 	for card_id: StringName in CardCatalog.STARTER_IDS:
 		_add_deck_card(card_id, false)
+
+
+func to_save_dict() -> Dictionary:
+	var saved_deck: Array[Dictionary] = []
+	for instance: Dictionary in deck_instances:
+		saved_deck.append({
+			"instance_id": int(instance[&"instance_id"]),
+			"card_id": str(instance[&"card_id"]),
+			"upgrade_id": str(instance.get(&"upgrade_id", &"")),
+		})
+	var saved_evidence: Array[Dictionary] = []
+	for record: Dictionary in evidence_records:
+		saved_evidence.append({
+			"id": str(record[&"id"]),
+			"title": str(record[&"title"]),
+			"source": str(record[&"source"]),
+			"description": str(record[&"description"]),
+		})
+	return {
+		"seed_value": seed_value,
+		"current_node_id": str(current_node_id),
+		"visited_node_ids": _string_name_array_to_strings(visited_node_ids),
+		"available_node_ids": _string_name_array_to_strings(available_node_ids),
+		"current_node": current_node,
+		"player_hp": player_hp,
+		"player_max_hp": player_max_hp,
+		"ink_crystals": ink_crystals,
+		"deck_instances": saved_deck,
+		"next_deck_instance_id": next_deck_instance_id,
+		"acquired_card_ids": _string_name_array_to_strings(acquired_card_ids),
+		"relics": _string_name_array_to_strings(relics),
+		"evidence_records": saved_evidence,
+		"completed_node_ids": _map_node_ids_with_state(&"completed"),
+		"revealed_node_ids": _map_node_ids_with_state(&"revealed"),
+		"reward_round": reward_round,
+		"shop_remove_count": shop_remove_count,
+		"next_battle_missing_name": next_battle_missing_name,
+		"next_battle_instability_threshold_delta": next_battle_instability_threshold_delta,
+		"next_battle_enemy_strength": next_battle_enemy_strength,
+		"next_battle_initial_draw_bonus": next_battle_initial_draw_bonus,
+		"next_battle_reward_relic_id": str(next_battle_reward_relic_id),
+		"fracture_damage_override": fracture_damage_override,
+		"institution_relation": institution_relation,
+		"event_history_hints_hidden": event_history_hints_hidden,
+		"event_history": event_history.duplicate(),
+		"completed_battles": completed_battles.duplicate(),
+		"boss_ending_id": str(boss_ending_id),
+		"boss_ending_text": boss_ending_text,
+		"run_completed": run_completed,
+	}
+
+
+## 返回空字符串表示成功。所有校验均在候选模型上完成，失败不会修改当前实例。
+func load_from_save_dict(data: Dictionary) -> String:
+	for field: String in SAVE_FIELDS:
+		if not data.has(field):
+			return "存档缺少字段：%s" % field
+	var integer_ranges: Dictionary = {
+		"seed_value": Vector2i(0, MAX_SAVE_INSTANCE_ID),
+		"current_node": Vector2i(0, 9),
+		"player_hp": Vector2i(0, MAX_SAVE_HP),
+		"player_max_hp": Vector2i(1, MAX_SAVE_HP),
+		"ink_crystals": Vector2i(0, MAX_SAVE_INK),
+		"next_deck_instance_id": Vector2i(1, MAX_SAVE_INSTANCE_ID),
+		"reward_round": Vector2i(0, MAX_SAVE_COUNTER),
+		"shop_remove_count": Vector2i(0, MAX_SAVE_COUNTER),
+		"next_battle_missing_name": Vector2i(0, 100),
+		"next_battle_instability_threshold_delta": Vector2i(-100, 100),
+		"next_battle_enemy_strength": Vector2i(-100, 100),
+		"next_battle_initial_draw_bonus": Vector2i(0, 100),
+		"fracture_damage_override": Vector2i(0, 100),
+		"institution_relation": Vector2i(-100, 100),
+	}
+	for raw_field: Variant in integer_ranges.keys():
+		var field: String = str(raw_field)
+		var bounds: Vector2i = integer_ranges[field]
+		if not _is_json_integer(data[field]):
+			return "存档字段%s必须是整数" % field
+		var value: int = int(data[field])
+		if value < bounds.x or value > bounds.y:
+			return "存档字段%s超出范围" % field
+	if int(data["player_hp"]) > int(data["player_max_hp"]):
+		return "当前生命不能大于最大生命"
+	for field: String in ["current_node_id", "next_battle_reward_relic_id", "boss_ending_id", "boss_ending_text"]:
+		if typeof(data[field]) != TYPE_STRING:
+			return "存档字段%s必须是字符串" % field
+	for field: String in ["event_history_hints_hidden", "run_completed"]:
+		if typeof(data[field]) != TYPE_BOOL:
+			return "存档字段%s必须是布尔值" % field
+	for field: String in [
+		"visited_node_ids", "available_node_ids", "deck_instances", "acquired_card_ids", "relics",
+		"evidence_records", "completed_node_ids", "revealed_node_ids", "event_history", "completed_battles",
+	]:
+		if typeof(data[field]) != TYPE_ARRAY:
+			return "存档字段%s必须是数组" % field
+
+	var candidate: RunModel = RunModel.new()
+	candidate.start_run(int(data["seed_value"]))
+	var graph_errors: Array[String] = candidate.map_graph.validate()
+	if not graph_errors.is_empty():
+		return "地图校验失败：%s" % "; ".join(graph_errors)
+
+	var parsed_node_arrays: Dictionary = {}
+	for field: String in ["visited_node_ids", "available_node_ids", "completed_node_ids", "revealed_node_ids"]:
+		var parsed_ids: Array[StringName] = []
+		var seen_ids: Dictionary = {}
+		for raw_id: Variant in data[field]:
+			if typeof(raw_id) != TYPE_STRING or str(raw_id).is_empty():
+				return "%s包含无效节点ID" % field
+			var node_id: StringName = StringName(str(raw_id))
+			if candidate.map_graph.get_node(node_id) == null:
+				return "%s包含未知节点：%s" % [field, node_id]
+			if seen_ids.has(node_id):
+				return "%s包含重复节点：%s" % [field, node_id]
+			seen_ids[node_id] = true
+			parsed_ids.append(node_id)
+		parsed_node_arrays[field] = parsed_ids
+
+	var parsed_deck: Array[Dictionary] = []
+	var instance_ids: Dictionary = {}
+	var max_instance_id: int = 0
+	for raw_instance: Variant in data["deck_instances"]:
+		if typeof(raw_instance) != TYPE_DICTIONARY:
+			return "牌组实例必须是对象"
+		var instance: Dictionary = raw_instance as Dictionary
+		for field: String in ["instance_id", "card_id", "upgrade_id"]:
+			if not instance.has(field):
+				return "牌组实例缺少字段：%s" % field
+		if not _is_json_integer(instance["instance_id"]):
+			return "牌组实例ID必须是整数"
+		var instance_id: int = int(instance["instance_id"])
+		if instance_id < 1 or instance_id > MAX_SAVE_INSTANCE_ID:
+			return "牌组实例ID超出范围"
+		if instance_ids.has(instance_id):
+			return "牌组存在重复实例ID：%d" % instance_id
+		if typeof(instance["card_id"]) != TYPE_STRING or typeof(instance["upgrade_id"]) != TYPE_STRING:
+			return "牌组card_id/upgrade_id必须是字符串"
+		var card_id: StringName = StringName(str(instance["card_id"]))
+		var upgrade_id: StringName = StringName(str(instance["upgrade_id"]))
+		if not CardCatalog.has_card(card_id):
+			return "牌组包含未知卡牌：%s" % card_id
+		if upgrade_id != &"" and CardUpgradeCatalog.get_upgrade(card_id, upgrade_id).is_empty():
+			return "牌组包含未知升级：%s/%s" % [card_id, upgrade_id]
+		instance_ids[instance_id] = true
+		max_instance_id = maxi(max_instance_id, instance_id)
+		parsed_deck.append({&"instance_id": instance_id, &"card_id": card_id, &"upgrade_id": upgrade_id})
+	if int(data["next_deck_instance_id"]) <= max_instance_id:
+		return "next_deck_instance_id必须大于所有已有实例ID"
+
+	var parsed_acquired: Array[StringName] = []
+	for raw_card_id: Variant in data["acquired_card_ids"]:
+		if typeof(raw_card_id) != TYPE_STRING:
+			return "acquired_card_ids包含非字符串"
+		var card_id: StringName = StringName(str(raw_card_id))
+		if not CardCatalog.has_card(card_id):
+			return "acquired_card_ids包含未知卡牌：%s" % card_id
+		parsed_acquired.append(card_id)
+
+	var parsed_relics: Array[StringName] = []
+	for raw_relic_id: Variant in data["relics"]:
+		if typeof(raw_relic_id) != TYPE_STRING:
+			return "relics包含非字符串"
+		var relic_id: StringName = StringName(str(raw_relic_id))
+		if not RuleEngine.RELIC_DEFINITIONS.has(relic_id):
+			return "存档包含未知遗物：%s" % relic_id
+		parsed_relics.append(relic_id)
+	var reward_relic_id: StringName = StringName(str(data["next_battle_reward_relic_id"]))
+	if reward_relic_id != &"" and not RuleEngine.RELIC_DEFINITIONS.has(reward_relic_id):
+		return "下一战奖励包含未知遗物：%s" % reward_relic_id
+
+	var parsed_evidence: Array[Dictionary] = []
+	var evidence_ids: Dictionary = {}
+	for raw_record: Variant in data["evidence_records"]:
+		if typeof(raw_record) != TYPE_DICTIONARY:
+			return "evidence_records条目必须是对象"
+		var record: Dictionary = raw_record as Dictionary
+		for field: String in ["id", "title", "source", "description"]:
+			if not record.has(field) or typeof(record[field]) != TYPE_STRING:
+				return "证据记录字段%s缺失或类型错误" % field
+		var evidence_id: StringName = StringName(str(record["id"]))
+		if not EvidenceCatalog.has_evidence(evidence_id):
+			return "存档包含未知证据：%s" % evidence_id
+		if evidence_ids.has(evidence_id):
+			return "存档包含重复证据：%s" % evidence_id
+		evidence_ids[evidence_id] = true
+		parsed_evidence.append(EvidenceCatalog.get_record(evidence_id))
+
+	var parsed_history: Array[String] = []
+	for raw_entry: Variant in data["event_history"]:
+		if typeof(raw_entry) != TYPE_STRING:
+			return "event_history包含非字符串"
+		parsed_history.append(str(raw_entry))
+	var parsed_battles: Array[int] = []
+	var battle_depths: Dictionary = {}
+	for raw_depth: Variant in data["completed_battles"]:
+		if not _is_json_integer(raw_depth):
+			return "completed_battles包含非整数"
+		var depth: int = int(raw_depth)
+		if depth < 1 or depth > 9 or battle_depths.has(depth):
+			return "completed_battles包含无效或重复层级"
+		battle_depths[depth] = true
+		parsed_battles.append(depth)
+
+	var completed_ids: Array[StringName] = parsed_node_arrays["completed_node_ids"]
+	var revealed_ids: Array[StringName] = parsed_node_arrays["revealed_node_ids"]
+	var visited_ids: Array[StringName] = parsed_node_arrays["visited_node_ids"]
+	var available_ids: Array[StringName] = parsed_node_arrays["available_node_ids"]
+	for raw_node: Variant in candidate.map_graph.nodes_by_id.values():
+		var map_node: MapNode = raw_node as MapNode
+		map_node.completed = completed_ids.has(map_node.id)
+		map_node.revealed = revealed_ids.has(map_node.id)
+		map_node.reachable = available_ids.has(map_node.id)
+	for node_id: StringName in completed_ids:
+		if not revealed_ids.has(node_id) or not visited_ids.has(node_id):
+			return "已完成节点必须同时已访问且已揭示：%s" % node_id
+	for node_id: StringName in visited_ids:
+		if not completed_ids.has(node_id):
+			return "检查点不能包含未完成的已访问节点：%s" % node_id
+	for node_id: StringName in available_ids:
+		if completed_ids.has(node_id) or not revealed_ids.has(node_id):
+			return "可达节点状态不一致：%s" % node_id
+
+	var loaded_current_id: StringName = StringName(str(data["current_node_id"]))
+	var expected_available: Array[StringName] = []
+	if loaded_current_id == &"":
+		if int(data["current_node"]) != 0 or not completed_ids.is_empty() or not visited_ids.is_empty():
+			return "空当前位置只允许用于新远征检查点"
+		expected_available = candidate.map_graph.start_node_ids.duplicate()
+	else:
+		var current_map_node: MapNode = candidate.map_graph.get_node(loaded_current_id)
+		if current_map_node == null:
+			return "current_node_id包含未知节点：%s" % loaded_current_id
+		if not current_map_node.completed or not visited_ids.has(loaded_current_id):
+			return "当前位置必须是已完整结算的节点"
+		if int(data["current_node"]) != current_map_node.depth:
+			return "current_node与节点层级不一致"
+		for next_id: StringName in current_map_node.connections:
+			if not completed_ids.has(next_id):
+				expected_available.append(next_id)
+	if not _same_string_name_set(available_ids, expected_available):
+		return "available_node_ids与地图推进状态不一致"
+
+	var ending_id: StringName = StringName(str(data["boss_ending_id"]))
+	if ending_id != &"" and ending_id != &"deliver_seal" and ending_id != &"read_original":
+		return "存档包含未知Boss结局：%s" % ending_id
+	if bool(data["run_completed"]):
+		if ending_id == &"" or str(data["boss_ending_text"]).is_empty() or not completed_ids.has(candidate.map_graph.boss_node_id):
+			return "已完成远征缺少合法Boss结算"
+	elif ending_id != &"" or not str(data["boss_ending_text"]).is_empty():
+		return "未完成远征不应包含Boss结算"
+
+	candidate.current_node_id = loaded_current_id
+	candidate.visited_node_ids = visited_ids
+	candidate.available_node_ids = available_ids
+	candidate.current_node = int(data["current_node"])
+	candidate.player_hp = int(data["player_hp"])
+	candidate.player_max_hp = int(data["player_max_hp"])
+	candidate.ink_crystals = int(data["ink_crystals"])
+	candidate.deck_instances = parsed_deck
+	candidate.next_deck_instance_id = int(data["next_deck_instance_id"])
+	candidate.acquired_card_ids = parsed_acquired
+	candidate.relics = parsed_relics
+	candidate.evidence_records = parsed_evidence
+	candidate.evidence.clear()
+	for record: Dictionary in candidate.evidence_records:
+		candidate.evidence.append(str(record[&"title"]))
+	candidate.reward_round = int(data["reward_round"])
+	candidate.shop_remove_count = int(data["shop_remove_count"])
+	candidate.next_battle_missing_name = int(data["next_battle_missing_name"])
+	candidate.next_battle_instability_threshold_delta = int(data["next_battle_instability_threshold_delta"])
+	candidate.next_battle_enemy_strength = int(data["next_battle_enemy_strength"])
+	candidate.next_battle_initial_draw_bonus = int(data["next_battle_initial_draw_bonus"])
+	candidate.next_battle_reward_relic_id = reward_relic_id
+	candidate.fracture_damage_override = int(data["fracture_damage_override"])
+	candidate.institution_relation = int(data["institution_relation"])
+	candidate.event_history_hints_hidden = bool(data["event_history_hints_hidden"])
+	candidate.event_history = parsed_history
+	candidate.completed_battles = parsed_battles
+	candidate.boss_ending_id = ending_id
+	candidate.boss_ending_text = str(data["boss_ending_text"])
+	candidate.run_completed = bool(data["run_completed"])
+	candidate._clear_pending_state_after_load()
+	graph_errors = candidate.map_graph.validate()
+	if not graph_errors.is_empty():
+		return "地图校验失败：%s" % "; ".join(graph_errors)
+	_apply_loaded_candidate(candidate)
+	return ""
+
+
+func _apply_loaded_candidate(candidate: RunModel) -> void:
+	schema_version = SCHEMA_VERSION
+	seed_value = candidate.seed_value
+	map_graph = candidate.map_graph
+	current_node_id = candidate.current_node_id
+	visited_node_ids = candidate.visited_node_ids.duplicate()
+	available_node_ids = candidate.available_node_ids.duplicate()
+	current_node = candidate.current_node
+	ink_crystals = candidate.ink_crystals
+	evidence = candidate.evidence.duplicate()
+	evidence_records = candidate.evidence_records.duplicate(true)
+	relics = candidate.relics.duplicate()
+	deck_instances = candidate.deck_instances.duplicate(true)
+	acquired_card_ids = candidate.acquired_card_ids.duplicate()
+	next_deck_instance_id = candidate.next_deck_instance_id
+	reward_round = candidate.reward_round
+	player_max_hp = candidate.player_max_hp
+	player_hp = candidate.player_hp
+	next_battle_missing_name = candidate.next_battle_missing_name
+	next_battle_instability_threshold_delta = candidate.next_battle_instability_threshold_delta
+	next_battle_enemy_strength = candidate.next_battle_enemy_strength
+	next_battle_initial_draw_bonus = candidate.next_battle_initial_draw_bonus
+	next_battle_reward_relic_id = candidate.next_battle_reward_relic_id
+	fracture_damage_override = candidate.fracture_damage_override
+	institution_relation = candidate.institution_relation
+	event_history_hints_hidden = candidate.event_history_hints_hidden
+	event_history = candidate.event_history.duplicate()
+	completed_battles = candidate.completed_battles.duplicate()
+	boss_ending_id = candidate.boss_ending_id
+	boss_ending_text = candidate.boss_ending_text
+	run_completed = candidate.run_completed
+	shop_remove_count = candidate.shop_remove_count
+	_clear_pending_state_after_load()
+
+
+func _clear_pending_state_after_load() -> void:
+	pending_reward_ids.clear()
+	selected_event_id = &""
+	event_resolved = false
+	event_outcome = ""
+	pending_event_selection.clear()
+	event_battle_pending = false
+	event_battle_reward_settled = false
+	pending_shop_stock.clear()
+	pending_node_resolution.clear()
+	last_action_error = ""
+
+
+func _map_node_ids_with_state(state: StringName) -> Array[String]:
+	var result: Array[String] = []
+	if map_graph == null:
+		return result
+	for depth: int in range(1, 10):
+		for node: MapNode in map_graph.get_nodes_at_depth(depth):
+			if (state == &"completed" and node.completed) or (state == &"revealed" and node.revealed):
+				result.append(str(node.id))
+	return result
+
+
+static func _string_name_array_to_strings(values: Array[StringName]) -> Array[String]:
+	var result: Array[String] = []
+	for value: StringName in values:
+		result.append(str(value))
+	return result
+
+
+static func _is_json_integer(value: Variant) -> bool:
+	if typeof(value) == TYPE_INT:
+		return true
+	if typeof(value) != TYPE_FLOAT:
+		return false
+	var float_value: float = float(value)
+	return is_finite(float_value) and float_value == floor(float_value)
+
+
+static func _same_string_name_set(first: Array[StringName], second: Array[StringName]) -> bool:
+	if first.size() != second.size():
+		return false
+	for value: StringName in first:
+		if not second.has(value):
+			return false
+	return true
 
 
 func get_relic_ids() -> Array[StringName]:

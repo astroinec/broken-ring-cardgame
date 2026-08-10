@@ -40,6 +40,9 @@ jobs:
       - name: Run run and event tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_run.gd'
 
+      - name: Run save and continue tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_save.gd'
+
       - name: Run route flow tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_flow.gd'
 

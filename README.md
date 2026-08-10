@@ -2,7 +2,7 @@
 
 单人肉鸽牌组构筑游戏原型。Godot 4.7.x + typed GDScript，简体中文优先。
 
-当前处于**规则原型阶段**：数值、机制与文本优先，美术与动画留到最后。界面为纯色、无图片、无动画。
+当前处于 **v0.9 Demo硬化（M3进行中）**：v1战斗外存档/继续里程碑已完成，剩余遗物接线、真人试玩与导出。数值、机制与文本优先，美术与动画留到最后。
 
 ## 快速开始
 
@@ -20,6 +20,7 @@ PROJECT=.
 # 核心规则与流程测试（CI还会运行地图、经济、UI、Boss和六事件专项测试）
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_combat.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_run.gd
+"$GODOT" --headless --path "$PROJECT" --script res://tests/test_save.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_flow.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_boss.gd
 "$GODOT" --headless --path "$PROJECT" --script res://tests/test_events.gd
@@ -56,12 +57,15 @@ docs/             协作与数值调整指引
 | 文件 | 职责 |
 | --- | --- |
 | `combat_model.gd` | 单场战斗状态与流程 |
-| `run_model.gd` | 远征进度、牌组、奖励、事件、遗物 |
+| `run_model.gd` | 远征进度、牌组、奖励、事件、遗物及v1存档字典校验 |
+| `save_manager.gd` | `user://` 存档读写、检查、摘要与删除 |
 | `card_catalog.gd` | 卡牌数据（19种） |
 | `enemy_catalog.gd` | 敌人数据（9 种） |
 | `rule_engine.gd` | 数值修正管线与遗物 |
 | `target_selector.gd` | 统一目标解析 |
 | `pending_selection.gd` | 待玩家指定目标的请求 |
+
+v1存档默认写入 `user://broken_ring_run_v1.json`。只保存战斗外节点检查点；进入战斗不会覆盖检查点，节点完整结算后自动保存，Boss结算后自动删除。协议与兼容性规则见 `docs/M3_SAVE_SPEC.md`。
 
 三条硬性规则：
 
@@ -81,6 +85,7 @@ docs/             协作与数值调整指引
 - 删名者两阶段战斗、可逆卡牌信息删除、终结选择与最小章节结算
 - 6 个文字事件、结构化证据档案与旧线索结算回收
 - 种子固定的商店库存与价格、卡牌购买、实例移除、固定路线升级
+- v1战斗外检查点：标题页继续、摘要、主动删除、损坏/版本不兼容安全降级；Boss结算自动删档
 - 2 件已接线遗物，6 件留数据位
 
 ## 引导原则
