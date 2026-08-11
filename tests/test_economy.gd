@@ -5,6 +5,7 @@ var failures: int = 0
 
 func _init() -> void:
 	_test_shop_determinism_and_ranges()
+	_test_shop_unlock_pool_and_unseen_guarantee()
 	_test_purchase_atomicity()
 	_test_removal_service()
 	_test_elite_rewards()
@@ -12,6 +13,7 @@ func _init() -> void:
 	_test_instance_upgrade()
 	_test_rest_and_forge()
 	_test_rest_salvage_tradeoff()
+	_test_rest_scavenge()
 	if failures == 0:
 		print("PASS: all economy and upgrade checks")
 		quit(0)
@@ -45,6 +47,27 @@ func _test_shop_determinism_and_ranges() -> void:
 	_expect(int(relic[&"price"]) >= 130 and int(relic[&"price"]) <= 170, "relic price is 130-170")
 	_expect(int(first[&"remove_service"][&"price"]) == 75, "first removal costs 75")
 	_expect(int(ShopCatalog.generate(73103, 1)[&"remove_service"][&"price"]) == 100, "second removal costs 100")
+
+
+func _test_shop_unlock_pool_and_unseen_guarantee() -> void:
+	var u0: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(0)
+	for seed_value: int in [73103, 80011, 91027, 100003, 110009]:
+		var stock: Dictionary = ShopCatalog.generate(seed_value, 0, [], u0, [])
+		for raw_item: Variant in stock[&"cards"]:
+			var item: Dictionary = raw_item as Dictionary
+			_expect(u0.has(item[&"card_id"] as StringName), "U0 商店 seed %d 不泄漏未解锁卡" % seed_value)
+	var unseen_target: StringName = u0[-1]
+	var seen: Array[StringName] = u0.duplicate()
+	seen.erase(unseen_target)
+	var guaranteed: Dictionary = ShopCatalog.generate(73103, 0, [], u0, seen)
+	var offered: Array[StringName] = []
+	for raw_item: Variant in guaranteed[&"cards"]:
+		offered.append((raw_item as Dictionary)[&"card_id"] as StringName)
+	_expect(offered.has(unseen_target), "商店至少保证一张本局战后奖励未见卡")
+	var u3: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(3)
+	var expanded: Dictionary = ShopCatalog.generate(73103, 0, [], u3, u0)
+	for raw_item: Variant in expanded[&"cards"]:
+		_expect(u3.has((raw_item as Dictionary)[&"card_id"] as StringName), "U3 商店仍严格来自冻结解锁池")
 
 
 func _test_purchase_atomicity() -> void:
@@ -165,7 +188,7 @@ func _test_shop_relic_pool() -> void:
 
 func _enter_elite(seed_value: int) -> RunModel:
 	var run: RunModel = RunModel.new()
-	run.start_run(seed_value)
+	run.start_run(seed_value, 1)
 	var elite_ids: Array[StringName] = [&"d06_00"]
 	run.available_node_ids = elite_ids
 	var elite: MapNode = run.map_graph.get_node(&"d06_00")
@@ -191,7 +214,7 @@ func _test_instance_upgrade() -> void:
 	_expect(upgraded_card.title.ends_with("+"), "upgraded battle card title shows plus")
 	_expect(upgraded_card.description != base_card.description, "upgrade changes battle card rules text")
 	_expect(not run.upgrade_card_instance(int(first[&"instance_id"])), "same instance cannot upgrade twice")
-	_expect(CardUpgradeCatalog.DEFINITIONS.size() == 19, "all nineteen formal cards have upgrade data")
+	_expect(CardUpgradeCatalog.DEFINITIONS.size() == 25, "all twenty-five formal cards have upgrade data")
 	for card_id: StringName in CardUpgradeCatalog.DEFINITIONS:
 		var definition: Dictionary = CardUpgradeCatalog.get_definition(card_id)
 		_expect((definition[&"upgrades"] as Array).size() >= 1, "%s upgrade schema reserves branches" % card_id)
@@ -215,8 +238,9 @@ func _test_rest_and_forge() -> void:
 	var rest_id: StringName = run.available_node_ids[0]
 	_expect(run.enter_node(rest_id), "enter rest node")
 	run.player_hp = 30
+	var expected_rest_hp: int = 30 + maxi(1, floori(float(run.player_max_hp) * 0.2))
 	_expect(run.resolve_rest_heal(), "rest heal resolves")
-	_expect(run.player_hp == 44, "rest heals twenty percent of max hp")
+	_expect(run.player_hp == expected_rest_hp, "rest heals twenty percent of max hp")
 	_expect(run.complete_current_node(), "rest node completes once")
 	# Choose forge lane at depth six after resolving depths four and five.
 	for depth: int in [4, 5]:
@@ -253,6 +277,41 @@ func _test_rest_salvage_tradeoff() -> void:
 	_expect(not run.resolve_rest_heal(), "resolved rest cannot also heal")
 	_expect(not run.resolve_rest_upgrade(int(run.deck_instances[0][&"instance_id"])), "resolved rest cannot also upgrade")
 	_expect(run.complete_current_node(), "salvage rest completes through node protocol")
+
+
+func _test_rest_scavenge() -> void:
+	var run: RunModel = RunModel.new()
+	run.start_run(73103)
+	var rest_node: MapNode = _first_node_of_type(run.map_graph, MapNode.NodeType.REST)
+	_expect(rest_node != null, "random templates expose a rest node for scavenging")
+	var rest_ids: Array[StringName] = [rest_node.id]
+	run.available_node_ids = rest_ids
+	_expect(run.enter_node(rest_node.id), "test can enter the rest node")
+	var deck_before: int = run.deck_instances.size()
+	_expect(run.resolve_rest_scavenge(), "rest can be spent on scavenging a card")
+	_expect(run.deck_instances.size() == deck_before + 1, "scavenging adds exactly one deck instance")
+	var added_id: StringName = run.deck_instances[-1][&"card_id"] as StringName
+	_expect(run.unlocked_reward_ids.has(added_id), "scavenged card comes from the frozen unlock pool")
+	_expect(run.run_seen_reward_ids.has(added_id), "scavenged card is recorded as seen this run")
+	_expect(not run.resolve_rest_heal(), "resolved scavenge rest cannot also heal")
+	_expect(not run.resolve_rest_scavenge(), "scavenging cannot repeat on the same rest node")
+	_expect(run.complete_current_node(), "scavenge rest completes through node protocol")
+
+	var replay: RunModel = RunModel.new()
+	replay.start_run(73103)
+	var replay_ids: Array[StringName] = [rest_node.id]
+	replay.available_node_ids = replay_ids
+	replay.enter_node(rest_node.id)
+	replay.resolve_rest_scavenge()
+	_expect(replay.deck_instances[-1][&"card_id"] == added_id, "scavenging is fully reproducible from the node seed")
+
+
+func _first_node_of_type(graph: MapGraph, node_type: MapNode.NodeType) -> MapNode:
+	for raw_node: Variant in graph.nodes_by_id.values():
+		var node: MapNode = raw_node as MapNode
+		if node.node_type == node_type:
+			return node
+	return null
 
 
 func _expect(condition: bool, label: String) -> void:

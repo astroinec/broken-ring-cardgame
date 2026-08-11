@@ -508,7 +508,7 @@ func _pick_echo_priority(model: CombatModel) -> int:
 func _find_card_by_id(model: CombatModel, card_id: StringName) -> int:
 	for index: int in range(model.hand.size()):
 		var card: CardData = model.hand[index]
-		if card.id == card_id and _is_playable(model, card):
+		if card.id == card_id and model.can_play_card(index):
 			return index
 	return -1
 
@@ -523,7 +523,7 @@ func _find_first_type(
 			var card: CardData = model.hand[index]
 			if card.card_type != wanted_type or excluded_ids.has(card.id):
 				continue
-			if _is_playable(model, card):
+			if model.can_play_card(index):
 				return index
 	return -1
 

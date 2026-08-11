@@ -61,8 +61,7 @@ func _simulate(seed_value: int) -> Dictionary:
 			actions += 1
 			continue
 		var card_index: int = _choose_card(model)
-		if card_index >= 0:
-			model.play_card(card_index)
+		if card_index >= 0 and model.play_card(card_index):
 			actions += 1
 			continue
 		model.end_player_turn()
@@ -97,9 +96,7 @@ func _choose_card(model: CombatModel) -> int:
 	var best_score: int = -1_000_000
 	for index: int in range(model.hand.size()):
 		var card: CardData = model.hand[index]
-		if card.card_type == CardData.CardType.STATUS and card.base_cost >= 99:
-			continue
-		if model.get_card_cost(card) > model.energy:
+		if not model.can_play_card(index):
 			continue
 		var score: int = _card_score(model, card)
 		if score > best_score:

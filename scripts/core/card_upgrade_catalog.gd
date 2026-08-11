@@ -22,6 +22,12 @@ static var DEFINITIONS: Dictionary = {
 	&"restate": _entry(&"restate_plus", "回响上一张攻式的 90% 伤害。", {&"echo_percent": 90}),
 	&"copied_guard": _entry(&"copied_guard_plus", "获得 6 点格挡；回响上一张守式 50% 的格挡效果。", {&"base_block": 6}),
 	&"homophone": _entry(&"homophone_plus", "复制紧邻上一张费用不高于 1 的非临时、非消逝牌；复制品消逝且本回合费用为 0。", {&"overload": 0}),
+	&"reverse_index": _entry(&"reverse_index_plus", "从弃牌堆选择 1 张非状态牌加入手牌；其本回合费用 -1（最低 0）。消逝。", {&"returned_cost_delta": -1}),
+	&"delete_redundancy": _entry(&"delete_redundancy_plus", "选择手牌中另一张牌并使其消逝；抽 3 张牌。消逝。", {&"draw": 3}),
+	&"missing_name_arbitration": _entry(&"missing_name_arbitration_plus", "清除全部缺名；每清除 1 层获得 5 点格挡；若至少清除 1 层，抽 1 张牌。消逝。", {&"block_per_stack": 5}),
+	&"tenth_answer": _entry(&"tenth_answer_plus", "造成 8 点伤害；封存区每有 1 张牌，额外造成 6 点伤害；随后所有封存牌倒计时减少 1。", {&"damage_per_sealed": 6}),
+	&"echo_chamber": _entry(&"echo_chamber_plus", "抽 1 张牌；本回合下一次成功回响的数值额外提高 75%。消逝。", {&"echo_bonus_percent": 75}),
+	&"borrowed_name_execution": _entry(&"borrowed_name_execution_plus", "造成 5 点伤害；每存在一种缺名，额外造成 5 点伤害；随后每种缺名各清除 1 层。", {&"damage_per_kind": 5}),
 }
 
 

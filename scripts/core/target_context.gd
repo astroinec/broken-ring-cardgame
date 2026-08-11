@@ -9,6 +9,7 @@ extends RefCounted
 
 
 var hand: Array[CardData] = []
+var discard_pile: Array[CardData] = []
 var sealed_zone: Array[CardData] = []
 var draw_pile: Array[CardData] = []
 var enemy_names: Array[String] = []

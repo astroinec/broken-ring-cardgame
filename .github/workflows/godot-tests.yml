@@ -40,6 +40,12 @@ jobs:
       - name: Run run and event tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_run.gd'
 
+      - name: Run profile, atomic save, and migration tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_profile.gd'
+
+      - name: Run M3 card and meta-progression tests
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_cards_meta.gd'
+
       - name: Run save and continue tests
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/test_save.gd'
 
@@ -90,6 +96,9 @@ jobs:
 
       - name: Run unassisted chapter balance audit
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_unassisted_chapter.gd'
+
+      - name: Run M3 replayability simulation
+        run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --script res://tests/sim_replayability.gd'
 
       - name: Smoke-test main scene
         run: '"$GODOT_BIN" --headless --path "$GITHUB_WORKSPACE" --quit-after 8'

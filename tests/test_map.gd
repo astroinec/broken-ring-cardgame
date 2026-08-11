@@ -4,8 +4,9 @@ var failures: int = 0
 
 
 func _init() -> void:
-	_test_fixed_structure()
+	_test_template_structure()
 	_test_determinism()
+	_test_diversity_thresholds()
 	_test_graph_validity()
 	_test_run_progression()
 	if failures == 0:
@@ -16,20 +17,29 @@ func _init() -> void:
 		quit(1)
 
 
-func _test_fixed_structure() -> void:
-	var graph: MapGraph = MapGraph.new()
-	graph.generate(73103)
-	_expect(graph.node_ids_by_depth.size() == 9, "map has exactly nine depths")
-	var expected_counts: Array[int] = [1, 2, 1, 2, 1, 2, 1, 1, 1]
-	for depth: int in range(1, 10):
-		_expect(graph.get_nodes_at_depth(depth).size() == expected_counts[depth - 1], "depth %d has expected lane count" % depth)
-	_expect(graph.get_nodes_at_depth(1)[0].node_type == MapNode.NodeType.BATTLE, "depth one is battle")
-	_expect(_types_at(graph, 2) == [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT], "depth two branches battle/event")
-	_expect(graph.get_nodes_at_depth(3)[0].node_type == MapNode.NodeType.REST, "depth three is rest")
-	_expect(_types_at(graph, 4) == [MapNode.NodeType.BATTLE, MapNode.NodeType.SHOP], "depth four branches battle/shop")
-	_expect(graph.get_nodes_at_depth(5)[0].node_type == MapNode.NodeType.EVENT, "depth five is event")
-	_expect(_types_at(graph, 6) == [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE], "depth six branches elite/forge")
-	_expect(graph.get_nodes_at_depth(9)[0].node_type == MapNode.NodeType.BOSS, "depth nine is the formal Boss node")
+func _test_template_structure() -> void:
+	var seen_templates: Dictionary = {}
+	for seed_value: int in range(1, 600):
+		var graph: MapGraph = MapGraph.new()
+		graph.generate(seed_value)
+		if seen_templates.has(graph.template_id):
+			continue
+		seen_templates[graph.template_id] = true
+		_expect(graph.node_ids_by_depth.size() == 9, "%s 模板恰好九层" % graph.template_id)
+		_expect(graph.validate().is_empty(), "%s 模板完整校验通过" % graph.template_id)
+		_expect(graph.get_nodes_at_depth(9).size() == 1 and graph.get_nodes_at_depth(9)[0].node_type == MapNode.NodeType.BOSS, "%s 模板第九层是唯一 Boss" % graph.template_id)
+		for depth: int in range(1, 10):
+			var width: int = graph.get_nodes_at_depth(depth).size()
+			_expect(width >= 1 and width <= 3, "%s 第%d层宽度在1到3" % [graph.template_id, depth])
+		var event_ids: Array[StringName] = []
+		for depth: int in range(1, 10):
+			for node: MapNode in graph.get_nodes_at_depth(depth):
+				if node.node_type == MapNode.NodeType.EVENT:
+					event_ids.append(node.event_id)
+		_expect(_unique_count(event_ids) == event_ids.size(), "%s 事件节点无放回" % graph.template_id)
+		if seen_templates.size() == MapGraph.TEMPLATES.size():
+			break
+	_expect(seen_templates.size() == MapGraph.TEMPLATES.size(), "全部地图模板都能由种子选中并合法生成")
 
 
 func _test_determinism() -> void:
@@ -41,9 +51,31 @@ func _test_determinism() -> void:
 	other.generate(73104)
 	_expect(first.digest() == second.digest(), "same seed reproduces graph digest")
 	_expect(first.digest() != other.digest(), "different seed changes graph digest")
+	for tier: int in range(4):
+		_expect(_run_content_digest(73103, tier) == _run_content_digest(73103, tier), "同 seed 同 U%d 完整内容摘要一致" % tier)
+	_expect(_run_content_digest(73103, 0) != _run_content_digest(73103, 3), "同 seed 不同解锁层拥有不同冻结奖励摘要")
 	for depth: int in range(1, 10):
 		for node: MapNode in first.get_nodes_at_depth(depth):
 			_expect(node.id == StringName("d%02d_%02d" % [depth, node.lane]), "node %s has stable id" % node.id)
+
+
+func _test_diversity_thresholds() -> void:
+	var structures: Dictionary = {}
+	var event_pairs: Dictionary = {}
+	for index: int in range(30):
+		var seed_value: int = 73103 + index * 7919
+		var graph: MapGraph = MapGraph.new()
+		graph.generate(seed_value)
+		structures[graph.structure_digest()] = true
+		event_pairs[graph.event_ordered_pair()] = true
+		var event_ids: Array[StringName] = []
+		for depth: int in range(1, 10):
+			for node: MapNode in graph.get_nodes_at_depth(depth):
+				if node.node_type == MapNode.NodeType.EVENT:
+					event_ids.append(node.event_id)
+		_expect(_unique_count(event_ids) == event_ids.size(), "seed %d 事件无放回" % seed_value)
+	_expect(structures.size() >= 12, "30种子结构指纹至少12种（实际%d）" % structures.size())
+	_expect(event_pairs.size() >= 12, "30种子事件有序对至少12种（实际%d）" % event_pairs.size())
 
 
 func _test_graph_validity() -> void:
@@ -53,10 +85,16 @@ func _test_graph_validity() -> void:
 		var errors: Array[String] = graph.validate()
 		_expect(errors.is_empty(), "seed %d graph validates: %s" % [seed_value, "; ".join(errors)])
 		for depth: int in range(1, 9):
-			for node: MapNode in graph.get_nodes_at_depth(depth):
+			var current_nodes: Array[MapNode] = graph.get_nodes_at_depth(depth)
+			var next_nodes: Array[MapNode] = graph.get_nodes_at_depth(depth + 1)
+			var edge_count: int = 0
+			for node: MapNode in current_nodes:
 				_expect(not node.connections.is_empty(), "%s has successor" % node.id)
+				edge_count += node.connections.size()
 				for next_id: StringName in node.connections:
 					_expect(graph.get_node(next_id).depth == depth + 1, "%s connects only to next depth" % node.id)
+			if current_nodes.size() > 1 and next_nodes.size() > 1:
+				_expect(edge_count < current_nodes.size() * next_nodes.size(), "seed %d 第%d层不是全互连" % [seed_value, depth])
 
 
 func _test_run_progression() -> void:
@@ -101,6 +139,21 @@ func _types_at(graph: MapGraph, depth: int) -> Array[int]:
 	for node: MapNode in graph.get_nodes_at_depth(depth):
 		result.append(node.node_type)
 	return result
+
+
+func _run_content_digest(seed_value: int, tier: int) -> String:
+	var run: RunModel = RunModel.new()
+	run.start_run(seed_value, tier)
+	var rewards: Array[StringName] = run.generate_reward_choices(1)
+	var shop: Dictionary = ShopCatalog.generate(seed_value + 404, 0, [], run.unlocked_reward_ids, run.run_seen_reward_ids)
+	return "%s|U%d|%s|%s" % [run.map_graph.digest(), tier, str(rewards), ShopCatalog.digest(shop)]
+
+
+func _unique_count(values: Array[StringName]) -> int:
+	var seen: Dictionary = {}
+	for value: StringName in values:
+		seen[value] = true
+	return seen.size()
 
 
 func _expect(condition: bool, label: String) -> void:

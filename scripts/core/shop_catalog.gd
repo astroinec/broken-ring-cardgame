@@ -5,30 +5,49 @@ extends RefCounted
 const COMMON_CARD_IDS: Array[StringName] = [
 	&"broken_sentence", &"blank_space", &"index_reorder", &"unsigned_support",
 	&"rift_slash", &"forced_stability", &"delayed_guard", &"countdown_scar",
-	&"restate", &"copied_guard",
+	&"restate", &"copied_guard", &"reverse_index", &"delete_redundancy", &"borrowed_name_execution",
 ]
 const RARE_CARD_IDS: Array[StringName] = [
 	&"critical_permission", &"dissolution_protocol", &"prewritten_ending", &"unseal_order", &"homophone",
+	&"missing_name_arbitration", &"tenth_answer", &"echo_chamber",
 ]
 
+
 static func generate(
-	content_seed: int, remove_count: int, owned_relics: Array[StringName] = []
+	content_seed: int,
+	remove_count: int,
+	owned_relics: Array[StringName] = [],
+	unlocked_card_ids: Array[StringName] = [],
+	run_seen_reward_ids: Array[StringName] = []
 ) -> Dictionary:
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = content_seed
-	var common_pool: Array[StringName] = COMMON_CARD_IDS.duplicate()
+	var allowed: Array[StringName] = unlocked_card_ids.duplicate()
+	if allowed.is_empty():
+		allowed = CardCatalog.REWARD_IDS.duplicate()
 	var cards: Array[Dictionary] = []
-	for draw_index: int in range(2):
-		var common_index: int = rng.randi_range(0, common_pool.size() - 1)
-		cards.append(_card_stock(common_pool[common_index], rng.randi_range(35, 45)))
-		common_pool.remove_at(common_index)
-	var use_rare: bool = rng.randi_range(0, 1) == 1
-	if use_rare:
-		var rare_id: StringName = RARE_CARD_IDS[rng.randi_range(0, RARE_CARD_IDS.size() - 1)]
-		cards.append(_card_stock(rare_id, rng.randi_range(65, 80)))
-	else:
-		var final_index: int = rng.randi_range(0, common_pool.size() - 1)
-		cards.append(_card_stock(common_pool[final_index], rng.randi_range(35, 45)))
+	var unseen: Array[StringName] = []
+	for card_id: StringName in allowed:
+		if not run_seen_reward_ids.has(card_id):
+			unseen.append(card_id)
+	var first_pool: Array[StringName] = unseen if not unseen.is_empty() else allowed
+	var rare_count: int = 0
+	if not first_pool.is_empty():
+		var first_id: StringName = first_pool[rng.randi_range(0, first_pool.size() - 1)]
+		cards.append(_card_stock(first_id, _price_for(first_id, rng)))
+		rare_count += 1 if RARE_CARD_IDS.has(first_id) else 0
+		allowed.erase(first_id)
+	while cards.size() < 3 and not allowed.is_empty():
+		var candidates: Array[StringName] = []
+		for card_id: StringName in allowed:
+			if rare_count == 0 or not RARE_CARD_IDS.has(card_id):
+				candidates.append(card_id)
+		if candidates.is_empty():
+			break
+		var card_id: StringName = candidates[rng.randi_range(0, candidates.size() - 1)]
+		cards.append(_card_stock(card_id, _price_for(card_id, rng)))
+		rare_count += 1 if RARE_CARD_IDS.has(card_id) else 0
+		allowed.erase(card_id)
 	var relic_stock: Dictionary = {}
 	var relic_pool: Array[StringName] = RelicCatalog.get_shop_offer_ids(owned_relics)
 	if not relic_pool.is_empty():
@@ -52,6 +71,10 @@ static func digest(stock: Dictionary) -> String:
 	var service: Dictionary = stock.get(&"remove_service", {})
 	parts.append("remove=%d/%d" % [service.get(&"price", 0), 1 if bool(service.get(&"sold", false)) else 0])
 	return "|".join(parts)
+
+
+static func _price_for(card_id: StringName, rng: RandomNumberGenerator) -> int:
+	return rng.randi_range(65, 80) if RARE_CARD_IDS.has(card_id) else rng.randi_range(35, 45)
 
 
 static func _card_stock(card_id: StringName, price: int) -> Dictionary:

@@ -42,6 +42,7 @@ func _simulate_chapter(seed_value: int, strategy: Strategy) -> Dictionary:
 	var total_turns: int = 0
 	var fractures: int = 0
 	var timeout: bool = false
+	var timeout_enemy_id: StringName = &""
 	var death_kind: StringName = &""
 	var reached_boss: bool = false
 	var boss_won: bool = false
@@ -58,6 +59,8 @@ func _simulate_chapter(seed_value: int, strategy: Strategy) -> Dictionary:
 				total_turns += int(combat[&"turns"])
 				fractures += int(combat[&"fractures"])
 				timeout = timeout or bool(combat[&"timeout"])
+				if bool(combat[&"timeout"]):
+					timeout_enemy_id = node.enemy_id
 				run.player_hp = int(combat[&"hp"])
 				if not bool(combat[&"won"]):
 					death_kind = &"elite" if node.node_type == MapNode.NodeType.ELITE else &"normal"
@@ -134,6 +137,7 @@ func _simulate_chapter(seed_value: int, strategy: Strategy) -> Dictionary:
 		&"fractures": fractures,
 		&"elite_rewards": elite_rewards,
 		&"timeout": timeout,
+		&"timeout_enemy_id": timeout_enemy_id,
 		&"digest": "%d/%d/%d/%d/%d/%d/%d/%d/%d/%s/%d" % [
 			1 if completed else 0, reached_depth, total_turns, run.player_hp, run.relics.size(),
 			run.ink_crystals, run.deck_instances.size(), fractures, elite_rewards, death_kind,
@@ -164,9 +168,7 @@ func _fight(run: RunModel, enemy_id: StringName, battle_seed: int, strategy: Str
 			actions += 1
 			continue
 		var card_index: int = _choose_card(model, strategy)
-		if card_index >= 0:
-			model.play_card(card_index)
-		else:
+		if card_index < 0 or not model.play_card(card_index):
 			model.end_player_turn()
 		actions += 1
 	var telemetry: Dictionary = model.get_telemetry()
@@ -187,9 +189,7 @@ func _choose_card(model: CombatModel, strategy: Strategy) -> int:
 	var incoming_damage: int = _visible_incoming_damage(model)
 	for index: int in range(model.hand.size()):
 		var card: CardData = model.hand[index]
-		if card.card_type == CardData.CardType.STATUS and card.base_cost >= 99:
-			continue
-		if model.get_card_cost(card) > model.energy:
+		if not model.can_play_card(index):
 			continue
 		var score: int = 20 - model.get_card_cost(card) * 3
 		var effective_type: int = model.get_card_effective_type(card)
@@ -197,6 +197,9 @@ func _choose_card(model: CombatModel, strategy: Strategy) -> int:
 			score += 45
 		if effective_type == CardData.CardType.ATTACK:
 			score += 52 if strategy == Strategy.OFFENSE else 32
+			# 稳健策略也必须结束战斗；长局后提高合法攻击优先级，避免无限格挡假死锁。
+			if model.turn_number > 20:
+				score += 80
 		elif effective_type == CardData.CardType.DEFENSE:
 			var needs_block: bool = incoming_damage > model.player_block or model.player_hp <= 24
 			score += (78 if needs_block else 12) if strategy != Strategy.OFFENSE else (42 if model.player_hp <= 18 else 8)
@@ -327,6 +330,9 @@ func _resolve_rest(run: RunModel, strategy: Strategy, depth: int) -> void:
 	if strategy == Strategy.EVENT_ECONOMY and depth == 3:
 		run.resolve_rest_salvage()
 		return
+	# 进攻策略愿意用休整换取更多可用牌，形成与稳健路线不同的构筑取向。
+	if strategy == Strategy.OFFENSE and run.deck_instances.size() < 13 and run.resolve_rest_scavenge():
+		return
 	var candidates: Array[Dictionary] = run.get_unupgraded_instances()
 	if candidates.is_empty():
 		run.skip_rest()
@@ -391,6 +397,12 @@ func _first_enabled_choice(options: Array[Dictionary]) -> int:
 
 func _summarize(results: Array[Dictionary]) -> void:
 	print("《断环》M3无辅助章节基线｜%d固定种子×3策略=%d局｜无生命辅助、无失败重跑、无直接置胜" % [SEEDS.size(), results.size()])
+	for result: Dictionary in results:
+		if bool(result[&"timeout"]):
+			print("超时明细｜策略 %s｜种子 %d｜到达层 %d｜敌人 %s｜死亡类型 %s" % [
+				_strategy_name(result[&"strategy"] as Strategy), int(result[&"seed"]),
+				int(result[&"reached_depth"]), result[&"timeout_enemy_id"], result[&"death_kind"],
+			])
 	for strategy: Strategy in [Strategy.OFFENSE, Strategy.STEADY, Strategy.EVENT_ECONOMY]:
 		var subset: Array[Dictionary] = _for_strategy(results, strategy)
 		var wins: int = _count_true(subset, &"completed")

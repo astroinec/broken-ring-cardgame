@@ -8,19 +8,30 @@ func _init() -> void:
 
 
 func _run() -> void:
-	var save_path: String = "user://broken_ring_flow_test_%d.json" % OS.get_process_id()
+	var suffix: String = "%d" % OS.get_process_id()
+	var save_path: String = "user://broken_ring_flow_test_%s.json" % suffix
+	var profile_path: String = "user://broken_ring_flow_profile_test_%s.json" % suffix
 	var save_manager: SaveManager = SaveManager.new(save_path)
+	var profile_manager: ProfileManager = ProfileManager.new(profile_path)
 	save_manager.delete()
+	profile_manager.delete()
 	_expect(int(ProjectSettings.get_setting("display/window/size/window_width_override")) <= 960, "default window fits compact desktop width")
 	_expect(int(ProjectSettings.get_setting("display/window/size/window_height_override")) <= 540, "default window fits compact desktop height")
 	_expect(str(ProjectSettings.get_setting("display/window/stretch/aspect")) == "keep", "window resizing preserves 16:9 viewport aspect")
 	var scene: PackedScene = load("res://scenes/main.tscn") as PackedScene
 	var main = scene.instantiate()
 	main.save_manager = save_manager
+	main.profile_manager = profile_manager
 	root.add_child(main)
 	await process_frame
 	_expect(main.screen_root.get_child_count() == 1, "main menu is shown on startup")
 	_expect(_find_button_with_text(main.screen_root, "继续远征") == null, "无存档时标题页不显示继续")
+	var seed_input: LineEdit = _find_named(main.screen_root, "SeedInput") as LineEdit
+	var seed_error: Label = _find_named(main.screen_root, "SeedInputError") as Label
+	_expect(seed_input != null and _find_button_with_text(main.screen_root, "使用种子复现") != null, "标题页提供随机种子复现入口")
+	main._start_seeded_run_from_text("not-a-seed", seed_input, seed_error)
+	_expect(seed_error.text.contains("正整数") and main.run_model == null, "非法 seed 显示错误且不开始远征")
+	await _test_profile_archive_ui(main, profile_manager)
 	main._start_test_level()
 	await process_frame
 	_expect(main.is_test_mode, "test level uses independent mode")
@@ -30,6 +41,14 @@ func _run() -> void:
 	_expect(main.screen_root.size.x <= 1280.0, "combat controls do not force the root wider than the logical viewport")
 	main._restart_run()
 	await process_frame
+	var first_random_seed: int = main.run_model.seed_value
+	main._restart_run()
+	await process_frame
+	var second_random_seed: int = main.run_model.seed_value
+	_expect(first_random_seed != second_random_seed, "连续新远征使用不同运行时随机 seed")
+	main._start_new_run_with_seed(73103)
+	await process_frame
+	_expect(main.run_model.seed_value == 73103, "测试可用固定 seed 精确复现")
 	_expect(not main.is_test_mode, "main route is separate from test mode")
 	_expect(main.current_stage == CombatModel.TUTORIAL_STAGE_MIN, "main route begins at first path node")
 	_expect(FileAccess.file_exists(save_path), "开始新远征立即写入战斗外检查点")
@@ -40,7 +59,7 @@ func _run() -> void:
 	main.run_model.player_hp = 1
 	main._continue_run()
 	await process_frame
-	_expect(main.ui_mode == &"map" and main.run_model.player_hp == 70, "继续远征加载存档并回到地图")
+	_expect(main.ui_mode == &"map" and main.run_model.player_hp == main.run_model.player_max_hp, "继续远征加载存档并回到地图")
 	for stage: int in range(1, CombatModel.TUTORIAL_STAGE_MAX + 1):
 		var model: CombatModel = CombatModel.new()
 		model.start_battle(73103, stage)
@@ -114,6 +133,8 @@ func _run() -> void:
 	_expect(not FileAccess.file_exists(save_path), "标题页可删除损坏存档")
 
 	main.queue_free()
+	save_manager.delete()
+	profile_manager.delete()
 	if failures == 0:
 		print("PASS: main route and test-level flow checks")
 		quit(0)
@@ -122,9 +143,26 @@ func _run() -> void:
 		quit(1)
 
 
+func _test_profile_archive_ui(main, profile_manager: ProfileManager) -> void:
+	main._show_profile_archive()
+	await process_frame
+	_expect(_tree_contains_text(main.screen_root, "断句"), "U0 图鉴显示已解锁卡完整名称")
+	_expect(_tree_contains_text(main.screen_root, "未识别残页") and not _tree_contains_text(main.screen_root, "第十种答案"), "U0 图鉴隐藏未解锁卡名称与正文")
+	var profile: Dictionary = ProfileManager.default_profile()
+	profile["unlock_tier"] = 3
+	profile["wins"] = 3
+	profile_manager.save_profile(profile)
+	main._show_profile_archive()
+	await process_frame
+	_expect(_tree_contains_text(main.screen_root, "第十种答案") and _tree_contains_text(main.screen_root, "回声室"), "U3 图鉴显示新卡完整内容")
+	profile_manager.save_profile(ProfileManager.default_profile())
+	main._show_main_menu()
+	await process_frame
+
+
 func _test_expedition_ui(main) -> void:
 	_expect(main.ui_mode == &"map", "starting a run opens the nine-depth map UI")
-	_expect(main.run_model.available_node_ids == [&"d01_00"], "map UI begins with only the legal start node")
+	_expect(main.run_model.available_node_ids == main.run_model.map_graph.start_node_ids, "map UI begins with exactly the legal seeded start nodes")
 	main._on_map_node_pressed(&"d02_01")
 	await process_frame
 	_expect(main.ui_mode == &"map", "UI rejects an unreachable map node")
@@ -140,8 +178,9 @@ func _test_expedition_ui(main) -> void:
 	_expect(main.run_model.ink_crystals == RunModel.NORMAL_BATTLE_INCOME, "battle UI settles normal-node ink income once")
 	main._on_reward_skipped()
 	await process_frame
-	_expect(main.ui_mode == &"map" and main.run_model.available_node_ids.size() == 2, "reward completion returns to the map and opens the fork")
+	_expect(main.ui_mode == &"map" and main.run_model.available_node_ids == main.run_model.map_graph.get_node(&"d01_00").connections, "reward completion returns to the map and opens seeded successors")
 
+	_force_available(main, &"d02_01")
 	main._on_map_node_pressed(&"d02_01")
 	await process_frame
 	_expect(main.ui_mode == &"event", "event node opens the event UI")
@@ -150,8 +189,9 @@ func _test_expedition_ui(main) -> void:
 	_expect(main.ui_mode == &"event_outcome", "event choice completes into an outcome screen")
 	main._show_map_screen()
 	await process_frame
-	_expect(main.run_model.available_node_ids == [&"d03_00"], "event outcome returns to the legal route successor")
+	_expect(main.run_model.available_node_ids == main.run_model.map_graph.get_node(&"d02_01").connections, "event outcome returns to the seeded legal successors")
 
+	_force_available(main, &"d03_00")
 	main._on_map_node_pressed(&"d03_00")
 	await process_frame
 	_expect(main.ui_mode == &"rest", "REST node opens heal/upgrade/skip choices")
@@ -159,6 +199,7 @@ func _test_expedition_ui(main) -> void:
 	await process_frame
 	_expect(main.ui_mode == &"map", "skipping REST returns to the map")
 
+	_force_available(main, &"d04_01")
 	main._on_map_node_pressed(&"d04_01")
 	await process_frame
 	_expect(main.ui_mode == &"shop", "shop node opens deterministic stock and removal UI")
@@ -170,6 +211,7 @@ func _test_expedition_ui(main) -> void:
 	await process_frame
 	_expect(main.ui_mode == &"map", "leaving the shop completes it and returns to map")
 
+	_force_available(main, &"d05_00")
 	main._on_map_node_pressed(&"d05_00")
 	await process_frame
 	_expect(main.ui_mode == &"event", "second event node is wired through the same map protocol")
@@ -178,6 +220,7 @@ func _test_expedition_ui(main) -> void:
 	main._show_map_screen()
 	await process_frame
 
+	_force_available(main, &"d06_01")
 	main._on_map_node_pressed(&"d06_01")
 	await process_frame
 	_expect(main.ui_mode == &"forge", "forge node opens instance upgrade selection")
@@ -188,6 +231,7 @@ func _test_expedition_ui(main) -> void:
 	_expect(main.ui_mode == &"map", "forge upgrade completes and returns to map")
 	_expect(main.run_model.get_deck_instance(forge_id)[&"upgrade_id"] != &"", "forge UI upgrades the selected stable instance")
 
+	_force_available(main, &"d07_00")
 	main._on_map_node_pressed(&"d07_00")
 	await process_frame
 	_expect(main.ui_mode == &"combat", "later battle node reuses combat UI with run deck")
@@ -204,6 +248,7 @@ func _test_expedition_ui(main) -> void:
 		main.run_model.player_max_hp,
 		40 + maxi(1, floori(float(main.run_model.player_max_hp) * 0.2))
 	)
+	_force_available(main, &"d08_00")
 	main._on_map_node_pressed(&"d08_00")
 	await process_frame
 	_expect(main.ui_mode == &"rest", "pre-Boss REST node opens correctly")
@@ -211,6 +256,7 @@ func _test_expedition_ui(main) -> void:
 	await process_frame
 	_expect(main.run_model.player_hp == expected_rest_hp and main.ui_mode == &"map", "REST heal applies 20 percent and returns to map")
 
+	_force_available(main, &"d09_00")
 	main._on_map_node_pressed(&"d09_00")
 	await process_frame
 	_expect(main.ui_mode == &"combat", "depth-nine node opens the formal Boss combat UI")
@@ -234,6 +280,7 @@ func _test_expedition_ui(main) -> void:
 	_expect(not FileAccess.file_exists(main.save_manager.save_path), "Boss结算后删除远征存档")
 	_expect(main.run_model.map_graph.get_node(&"d09_00").completed, "formal Boss can only be completed once through the node protocol")
 	_expect(main.run_model.evidence.has("第十份校准记录"), "hidden Boss ending reaches RunModel evidence")
+	_expect(_tree_contains_text(main.screen_root, "本局新解锁卡牌") and _tree_contains_text(main.screen_root, "第十种答案"), "结算页展示本局推进产生的新解锁")
 
 
 func _test_event_selection_and_event_battle_ui(main) -> void:
@@ -301,15 +348,16 @@ func _test_relic_ui(main) -> void:
 		_expect(_tree_contains_text(main.screen_root, "风味：%s" % definition[&"flavor"]), "relic archive shows %s flavor" % relic_id)
 	_expect(_tree_contains_text(main.screen_root, "可能仍被后续裂解杀死"), "return bell archive warning is explicit")
 
-	main._restart_run()
+	main._start_new_run_with_seed(73103)
 	await process_frame
 	main.run_model.relics.append(&"seventh_dock_stamp")
-	var shop_ids: Array[StringName] = [&"d04_01"]
+	var shop_node: MapNode = _first_node_of_type(main.run_model.map_graph, MapNode.NodeType.SHOP)
+	_expect(shop_node != null, "deterministic replay map contains a shop")
+	var shop_ids: Array[StringName] = [shop_node.id]
 	main.run_model.available_node_ids = shop_ids
-	var shop_node: MapNode = main.run_model.map_graph.get_node(&"d04_01")
 	shop_node.revealed = true
 	shop_node.reachable = true
-	main._on_map_node_pressed(&"d04_01")
+	main._on_map_node_pressed(shop_node.id)
 	await process_frame
 	var shop_digest: String = ShopCatalog.digest(main.run_model.pending_shop_stock)
 	_expect(_find_button_with_text(main.screen_root, "查看旧档案") != null, "dock stamp exposes the old archive action in shop UI")
@@ -359,6 +407,16 @@ func _test_relic_ui(main) -> void:
 		_expect(relic_hud.text.contains("可能仍被后续裂解杀死"), "RelicHUD keeps the return bell death warning explicit")
 
 
+func _force_available(main, node_id: StringName) -> void:
+	var forced: Array[StringName] = [node_id]
+	main.run_model.available_node_ids = forced
+	for raw_node: Variant in main.run_model.map_graph.nodes_by_id.values():
+		(raw_node as MapNode).reachable = false
+	var node: MapNode = main.run_model.map_graph.get_node(node_id)
+	node.revealed = true
+	node.reachable = true
+
+
 func _find_named(node: Node, wanted: String) -> Node:
 	if node.name == wanted:
 		return node
@@ -376,6 +434,14 @@ func _find_button_with_text(node: Node, fragment: String) -> Button:
 		var found: Button = _find_button_with_text(child, fragment)
 		if found != null:
 			return found
+	return null
+
+
+func _first_node_of_type(graph: MapGraph, node_type: MapNode.NodeType) -> MapNode:
+	for raw_node: Variant in graph.nodes_by_id.values():
+		var node: MapNode = raw_node as MapNode
+		if node.node_type == node_type:
+			return node
 	return null
 
 

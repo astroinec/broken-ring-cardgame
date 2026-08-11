@@ -2,17 +2,50 @@ class_name MapGraph
 extends RefCounted
 
 
-const DEPTH_TYPES: Dictionary = {
-	1: [MapNode.NodeType.BATTLE],
-	2: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT],
-	3: [MapNode.NodeType.REST],
-	4: [MapNode.NodeType.BATTLE, MapNode.NodeType.SHOP],
-	5: [MapNode.NodeType.EVENT],
-	6: [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE],
-	7: [MapNode.NodeType.BATTLE],
-	8: [MapNode.NodeType.REST],
-	9: [MapNode.NodeType.BOSS],
-}
+const TEMPLATES: Array[Dictionary] = [
+	{
+		&"id": &"archive_route",
+		&"depths": {
+			1: [MapNode.NodeType.BATTLE],
+			2: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT],
+			3: [MapNode.NodeType.REST, MapNode.NodeType.EVENT],
+			4: [MapNode.NodeType.BATTLE, MapNode.NodeType.SHOP, MapNode.NodeType.BATTLE],
+			5: [MapNode.NodeType.EVENT, MapNode.NodeType.REST],
+			6: [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE],
+			7: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT, MapNode.NodeType.BATTLE],
+			8: [MapNode.NodeType.REST, MapNode.NodeType.SHOP],
+			9: [MapNode.NodeType.BOSS],
+		},
+	},
+	{
+		&"id": &"rift_route",
+		&"depths": {
+			1: [MapNode.NodeType.BATTLE, MapNode.NodeType.BATTLE],
+			2: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT, MapNode.NodeType.BATTLE],
+			3: [MapNode.NodeType.REST],
+			4: [MapNode.NodeType.BATTLE, MapNode.NodeType.ELITE],
+			5: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT],
+			6: [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE, MapNode.NodeType.BATTLE],
+			7: [MapNode.NodeType.BATTLE, MapNode.NodeType.BATTLE],
+			8: [MapNode.NodeType.REST],
+			9: [MapNode.NodeType.BOSS],
+		},
+	},
+	{
+		&"id": &"calibration_route",
+		&"depths": {
+			1: [MapNode.NodeType.BATTLE],
+			2: [MapNode.NodeType.BATTLE, MapNode.NodeType.EVENT],
+			3: [MapNode.NodeType.REST, MapNode.NodeType.FORGE],
+			4: [MapNode.NodeType.BATTLE, MapNode.NodeType.SHOP, MapNode.NodeType.BATTLE],
+			5: [MapNode.NodeType.EVENT, MapNode.NodeType.REST, MapNode.NodeType.EVENT],
+			6: [MapNode.NodeType.ELITE, MapNode.NodeType.FORGE],
+			7: [MapNode.NodeType.BATTLE, MapNode.NodeType.BATTLE],
+			8: [MapNode.NodeType.REST, MapNode.NodeType.FORGE],
+			9: [MapNode.NodeType.BOSS],
+		},
+	},
+]
 
 const BATTLE_ENEMY_POOLS: Dictionary = {
 	1: [&"nameless_dummy", &"calibration_guard"],
@@ -27,6 +60,7 @@ const EVENT_IDS: Array[StringName] = [
 ]
 
 var seed_value: int = 0
+var template_id: StringName = &""
 var nodes_by_id: Dictionary = {}
 var node_ids_by_depth: Dictionary = {}
 var start_node_ids: Array[StringName] = []
@@ -34,14 +68,19 @@ var boss_node_id: StringName = &""
 
 
 func generate(p_seed_value: int) -> void:
-	seed_value = p_seed_value
+	seed_value = maxi(1, p_seed_value)
 	nodes_by_id.clear()
 	node_ids_by_depth.clear()
 	start_node_ids.clear()
 	boss_node_id = &""
+	var graph_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	graph_rng.seed = seed_value
+	var template: Dictionary = TEMPLATES[graph_rng.randi_range(0, TEMPLATES.size() - 1)]
+	template_id = template[&"id"] as StringName
+	var depths: Dictionary = template[&"depths"] as Dictionary
 	for depth: int in range(1, 10):
 		var ids: Array[StringName] = []
-		var types: Array = DEPTH_TYPES[depth]
+		var types: Array = depths[depth]
 		for lane: int in range(types.size()):
 			var node: MapNode = MapNode.new()
 			node.id = StringName("d%02d_%02d" % [depth, lane])
@@ -49,15 +88,12 @@ func generate(p_seed_value: int) -> void:
 			node.depth = depth
 			node.lane = lane
 			node.content_seed = _derive_content_seed(depth, lane)
-			_assign_content(node)
+			_assign_non_event_content(node)
 			nodes_by_id[node.id] = node
 			ids.append(node.id)
 		node_ids_by_depth[depth] = ids
-	for depth: int in range(1, 9):
-		var next_ids: Array[StringName] = _ids_at_depth(depth + 1)
-		for node_id: StringName in _ids_at_depth(depth):
-			var node: MapNode = get_node(node_id)
-			node.connections = next_ids.duplicate()
+	_connect_depths(graph_rng)
+	_assign_events_without_replacement()
 	start_node_ids = _ids_at_depth(1)
 	boss_node_id = _ids_at_depth(9)[0]
 	for start_id: StringName in start_node_ids:
@@ -102,6 +138,8 @@ func validate() -> Array[String]:
 		if not node_ids_by_depth.has(depth):
 			errors.append("缺少第%d层" % depth)
 			continue
+		if get_nodes_at_depth(depth).size() > 3:
+			errors.append("第%d层超过3个节点" % depth)
 		for node: MapNode in get_nodes_at_depth(depth):
 			if node.id == &"":
 				errors.append("第%d层存在空节点ID" % depth)
@@ -139,7 +177,7 @@ func validate() -> Array[String]:
 
 
 func digest() -> String:
-	var parts: Array[String] = ["seed=%d" % seed_value]
+	var parts: Array[String] = ["seed=%d" % seed_value, "template=%s" % template_id]
 	for depth: int in range(1, 10):
 		for node: MapNode in get_nodes_at_depth(depth):
 			var links: Array[String] = []
@@ -153,6 +191,89 @@ func digest() -> String:
 	return "|".join(parts)
 
 
+func structure_digest() -> String:
+	var parts: Array[String] = [str(template_id)]
+	for depth: int in range(1, 10):
+		for node: MapNode in get_nodes_at_depth(depth):
+			var links: Array[String] = []
+			for next_id: StringName in node.connections:
+				links.append(str(next_id))
+			parts.append("%s:%d:%s" % [node.id, node.node_type, ",".join(links)])
+	return "|".join(parts)
+
+
+func event_ordered_pair() -> String:
+	var events: Array[String] = []
+	for depth: int in range(1, 10):
+		for node: MapNode in get_nodes_at_depth(depth):
+			if node.node_type == MapNode.NodeType.EVENT:
+				events.append(str(node.event_id))
+	return "|".join(events.slice(0, mini(2, events.size())))
+
+
+func _connect_depths(graph_rng: RandomNumberGenerator) -> void:
+	for depth: int in range(1, 9):
+		var current_ids: Array[StringName] = _ids_at_depth(depth)
+		var next_ids: Array[StringName] = _ids_at_depth(depth + 1)
+		var shuffled_current: Array[StringName] = current_ids.duplicate()
+		_shuffle_ids(shuffled_current, graph_rng)
+		var shuffled_next: Array[StringName] = next_ids.duplicate()
+		_shuffle_ids(shuffled_next, graph_rng)
+		for next_index: int in range(shuffled_next.size()):
+			var predecessor: MapNode = get_node(shuffled_current[next_index % shuffled_current.size()])
+			predecessor.connections.append(shuffled_next[next_index])
+		for current_id: StringName in shuffled_current:
+			var node: MapNode = get_node(current_id)
+			if node.connections.is_empty():
+				node.connections.append(shuffled_next[graph_rng.randi_range(0, shuffled_next.size() - 1)])
+			if shuffled_next.size() > 1 and node.connections.size() < shuffled_next.size() and graph_rng.randf() < 0.45:
+				var candidates: Array[StringName] = shuffled_next.duplicate()
+				for existing: StringName in node.connections:
+					candidates.erase(existing)
+				if not candidates.is_empty():
+					node.connections.append(candidates[graph_rng.randi_range(0, candidates.size() - 1)])
+			node.connections.sort_custom(_id_less)
+		_break_full_interconnect(current_ids, next_ids)
+
+
+func _break_full_interconnect(current_ids: Array[StringName], next_ids: Array[StringName]) -> void:
+	if current_ids.size() <= 1 or next_ids.size() <= 1:
+		return
+	var edge_count: int = 0
+	var incoming: Dictionary = {}
+	for next_id: StringName in next_ids:
+		incoming[next_id] = 0
+	for current_id: StringName in current_ids:
+		var node: MapNode = get_node(current_id)
+		edge_count += node.connections.size()
+		for next_id: StringName in node.connections:
+			incoming[next_id] = int(incoming[next_id]) + 1
+	if edge_count < current_ids.size() * next_ids.size():
+		return
+	for current_id: StringName in current_ids:
+		var node: MapNode = get_node(current_id)
+		if node.connections.size() <= 1:
+			continue
+		for next_id: StringName in node.connections.duplicate():
+			if int(incoming[next_id]) > 1:
+				node.connections.erase(next_id)
+				return
+
+
+func _assign_events_without_replacement() -> void:
+	var event_nodes: Array[MapNode] = []
+	for depth: int in range(1, 10):
+		for node: MapNode in get_nodes_at_depth(depth):
+			if node.node_type == MapNode.NodeType.EVENT:
+				event_nodes.append(node)
+	var event_pool: Array[StringName] = EVENT_IDS.duplicate()
+	var event_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	event_rng.seed = int((seed_value * 214013 + 2531011) & 0x7fffffff)
+	_shuffle_ids(event_pool, event_rng)
+	for index: int in range(event_nodes.size()):
+		event_nodes[index].event_id = event_pool[index]
+
+
 func _ids_at_depth(depth: int) -> Array[StringName]:
 	var result: Array[StringName] = []
 	for raw_id: Variant in node_ids_by_depth.get(depth, []):
@@ -161,25 +282,42 @@ func _ids_at_depth(depth: int) -> Array[StringName]:
 
 
 func _derive_content_seed(depth: int, lane: int) -> int:
-	return int((seed_value * 1103515245 + depth * 10007 + lane * 7919 + 12345) & 0x7fffffff)
+	return maxi(1, int((seed_value * 1103515245 + depth * 10007 + lane * 7919 + 12345) & 0x7fffffff))
 
 
-func _assign_content(node: MapNode) -> void:
+func _assign_non_event_content(node: MapNode) -> void:
 	var content_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	content_rng.seed = node.content_seed
 	match node.node_type:
 		MapNode.NodeType.BATTLE:
-			var pool: Array = BATTLE_ENEMY_POOLS[node.depth]
+			var pool: Array = _battle_pool_for_depth(node.depth)
 			node.enemy_id = pool[content_rng.randi_range(0, pool.size() - 1)] as StringName
 		MapNode.NodeType.ELITE:
 			node.enemy_id = ELITE_ENEMY_IDS[content_rng.randi_range(0, ELITE_ENEMY_IDS.size() - 1)]
-		MapNode.NodeType.EVENT:
-			# 直接混合种子的十位以上信息，避免常用奇数种子在模6时只落入少数事件。
-			# 两个事件深度相差3层，乘3后会落到事件池的另一半，扩大单局覆盖。
-			var event_index: int = posmod(int(seed_value / 10) + node.depth * 3 + node.lane * 5, EVENT_IDS.size())
-			node.event_id = EVENT_IDS[event_index]
 		MapNode.NodeType.BOSS:
 			node.enemy_id = &"name_eraser"
+
+
+func _battle_pool_for_depth(depth: int) -> Array:
+	if depth <= 1:
+		return BATTLE_ENEMY_POOLS[1]
+	if depth <= 3:
+		return BATTLE_ENEMY_POOLS[2]
+	if depth <= 6:
+		return BATTLE_ENEMY_POOLS[4]
+	return BATTLE_ENEMY_POOLS[7]
+
+
+func _shuffle_ids(values: Array[StringName], source_rng: RandomNumberGenerator) -> void:
+	for index: int in range(values.size() - 1, 0, -1):
+		var swap_index: int = source_rng.randi_range(0, index)
+		var held: StringName = values[index]
+		values[index] = values[swap_index]
+		values[swap_index] = held
+
+
+static func _id_less(first: StringName, second: StringName) -> bool:
+	return str(first) < str(second)
 
 
 func _boss_is_reachable() -> bool:

@@ -20,7 +20,9 @@ func _init() -> void:
 
 
 func _test_authorless_book() -> void:
-	var obey: RunModel = _event_run(&"authorless_book")
+	var locked: RunModel = _event_run(&"authorless_book", 73103, 0)
+	_expect(not bool(locked.get_event_options()[0][&"enabled"]) and not locked.apply_event_choice(0), "U0不能从事件提前获得未解锁的预写结局")
+	var obey: RunModel = _event_run(&"authorless_book", 73103, 1)
 	var hp_before: int = obey.player_hp
 	var deck_before: int = obey.deck_instances.size()
 	_expect(obey.apply_event_choice(0), "authorless obey resolves")
@@ -80,8 +82,10 @@ func _test_calibration_station() -> void:
 
 	var refuse_a: RunModel = _event_run(&"calibration_station", 88001)
 	var refuse_b: RunModel = _event_run(&"calibration_station", 88001)
+	var refuse_max_before: int = refuse_a.player_max_hp
 	_expect(refuse_a.apply_event_choice(2) and refuse_b.apply_event_choice(2), "calibration refusal resolves twice")
-	_expect(refuse_a.player_max_hp == 65 and refuse_a.get_deck_card_ids() == refuse_b.get_deck_card_ids(), "calibration refusal loses max hp and reproduces rare card")
+	_expect(refuse_a.player_max_hp == refuse_max_before - 5 and refuse_a.get_deck_card_ids() == refuse_b.get_deck_card_ids(), "calibration refusal loses max hp and reproduces rare card")
+	_expect(refuse_a.unlocked_reward_ids.has(refuse_a.get_deck_card_ids()[-1]), "calibration rare reward respects the frozen unlock pool")
 
 
 func _test_speaking_for_you() -> void:
@@ -105,7 +109,7 @@ func _test_speaking_for_you() -> void:
 	var silence: RunModel = _event_run(&"speaking_for_you")
 	var deck_before: int = silence.deck_instances.size()
 	_expect(silence.apply_event_choice(2), "speaking silence opens selection")
-	_expect(not silence.event_resolved and silence.get_pending_event_candidates().size() == 8, "speaking silence exposes only eight basic attack/defense instances")
+	_expect(not silence.event_resolved and silence.get_pending_event_candidates().size() == 5, "speaking silence exposes the five basic attack/defense instances")
 	_expect(silence.cancel_event_selection(), "speaking silence selection can cancel")
 	_expect(silence.deck_instances.size() == deck_before and not silence.event_resolved, "speaking silence cancel is trace-free")
 	_expect(silence.apply_event_choice(2), "speaking silence can reopen after cancel")
@@ -117,8 +121,9 @@ func _test_speaking_for_you() -> void:
 func _test_deleted_funeral() -> void:
 	var attend: RunModel = _event_run(&"deleted_funeral")
 	var deck_before: int = attend.deck_instances.size()
+	var attend_max_before: int = attend.player_max_hp
 	_expect(attend.apply_event_choice(0), "funeral attendance resolves")
-	_expect(attend.player_max_hp == 75 and attend.deck_instances.size() == deck_before + 1 and attend.get_deck_card_ids().has(&"old_wound"), "funeral attendance adds max hp and old wound")
+	_expect(attend.player_max_hp == attend_max_before + 5 and attend.deck_instances.size() == deck_before + 1 and attend.get_deck_card_ids().has(&"old_wound"), "funeral attendance adds max hp and old wound")
 
 	var erase: RunModel = _event_run(&"deleted_funeral")
 	var hp_before: int = erase.player_hp
@@ -137,8 +142,9 @@ func _test_deleted_funeral() -> void:
 
 func _test_definition_tax() -> void:
 	var pain: RunModel = _event_run(&"definition_tax")
+	var pain_max_before: int = pain.player_max_hp
 	_expect(pain.apply_event_choice(0), "definition pain resolves")
-	_expect(pain.player_max_hp == 66 and pain.fracture_damage_override == 5, "definition pain lowers max hp and persists fracture override")
+	_expect(pain.player_max_hp == pain_max_before - 4 and pain.fracture_damage_override == 5, "definition pain lowers max hp and persists fracture override")
 	var context: Dictionary = pain.consume_current_battle_context()
 	var battle: CombatModel = CombatModel.new()
 	battle.start_battle(10101, 6, [], &"word_eater", pain.get_relic_ids(), pain.get_deck_instances(), pain.player_hp, pain.player_max_hp, context)
@@ -187,9 +193,9 @@ func _test_evidence_catalog() -> void:
 		_expect(not str(record[&"description"]).is_empty(), "%s evidence has description" % raw_id)
 
 
-func _event_run(event_id: StringName, seed_value: int = 73103) -> RunModel:
+func _event_run(event_id: StringName, seed_value: int = 73103, unlock_tier: int = 0) -> RunModel:
 	var run: RunModel = RunModel.new()
-	run.start_run(seed_value)
+	run.start_run(seed_value, unlock_tier)
 	run.selected_event_id = event_id
 	run.event_resolved = false
 	return run

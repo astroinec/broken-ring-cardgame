@@ -7,6 +7,7 @@ var failures: int = 0
 
 func _init() -> void:
 	_test_card_catalog()
+	_test_meta_tier_filters()
 	_test_deterministic_rewards()
 	_test_choose_and_skip_reward()
 	_test_reward_enters_later_battle()
@@ -22,7 +23,7 @@ func _init() -> void:
 
 
 func _test_card_catalog() -> void:
-	_expect(CardCatalog.REWARD_IDS.size() == 15, "catalog exposes fifteen reward cards")
+	_expect(CardCatalog.REWARD_IDS.size() == 21, "catalog exposes twenty-one reward cards")
 	for card_id: StringName in CardCatalog.REWARD_IDS:
 		_expect(CardCatalog.has_card(card_id), "catalog contains %s" % card_id)
 		var definition: Dictionary = CardCatalog.get_definition(card_id)
@@ -30,6 +31,22 @@ func _test_card_catalog() -> void:
 		_expect(not str(definition.get(&"description", "")).is_empty(), "%s has rules text" % card_id)
 		_expect(not str(definition.get(&"rarity", "")).is_empty(), "%s has rarity" % card_id)
 		_expect(not str(definition.get(&"flavor", "")).is_empty(), "%s has flavor text" % card_id)
+
+
+func _test_meta_tier_filters() -> void:
+	var accumulated: Array[StringName] = []
+	for tier: int in range(4):
+		var unlocked: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(tier)
+		for card_id: StringName in MetaCatalog.TIER_CARD_IDS[tier]:
+			if not accumulated.has(card_id):
+				accumulated.append(card_id)
+		_expect(unlocked == accumulated, "U%d 奖励池严格等于累计解锁层" % tier)
+		var run = RunModelScript.new()
+		run.start_run(73103, tier)
+		_expect(run.unlocked_reward_ids == unlocked, "RunModel 冻结 U%d 奖励池" % tier)
+		var choices: Array[StringName] = run.generate_reward_choices(1)
+		for card_id: StringName in choices:
+			_expect(unlocked.has(card_id), "U%d 奖励不泄漏未解锁卡 %s" % [tier, card_id])
 
 
 func _test_deterministic_rewards() -> void:
@@ -42,9 +59,9 @@ func _test_deterministic_rewards() -> void:
 	_expect(first_choices == second_choices, "same seed and stage produce same rewards")
 	_expect(first_choices.size() == 3, "reward contains three choices")
 	_expect(first_choices[0] != first_choices[1] and first_choices[1] != first_choices[2] and first_choices[0] != first_choices[2], "reward choices are unique")
-	var stage_three_pool: Array[StringName] = [&"broken_sentence", &"blank_space", &"rift_slash", &"forced_stability"]
+	var u0_pool: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(0)
 	for card_id: StringName in first_choices:
-		_expect(stage_three_pool.has(card_id), "stage three reward does not expose later keywords: %s" % card_id)
+		_expect(u0_pool.has(card_id), "U0 reward does not expose locked cards: %s" % card_id)
 
 
 func _test_choose_and_skip_reward() -> void:
@@ -95,7 +112,8 @@ func _test_event_branches() -> void:
 		run.selected_event_id = event_id
 		var options: Array[Dictionary] = run.get_event_options(event_id)
 		_expect(options.size() >= 2, "%s has at least two choices" % event_id)
-		_expect(run.apply_event_choice(0, event_id), "%s first branch resolves" % event_id)
+		var enabled_index: int = _first_enabled_choice(options)
+		_expect(run.apply_event_choice(enabled_index, event_id), "%s first enabled branch resolves" % event_id)
 		_expect(run.event_resolved, "%s marks event resolved" % event_id)
 		_expect(not run.event_outcome.is_empty(), "%s produces outcome text" % event_id)
 	var gated = RunModelScript.new()
@@ -119,6 +137,13 @@ func _test_starting_relics() -> void:
 	var no_cards: Array[StringName] = []
 	battle.start_battle(73103, 3, no_cards, &"", run.get_relic_ids())
 	_expect(battle.rule_engine.has_relic(&"crack_stabilizer"), "battle rule engine receives run relics")
+
+
+func _first_enabled_choice(options: Array[Dictionary]) -> int:
+	for index: int in range(options.size()):
+		if bool(options[index][&"enabled"]):
+			return index
+	return -1
 
 
 func _expect(condition: bool, label: String) -> void:

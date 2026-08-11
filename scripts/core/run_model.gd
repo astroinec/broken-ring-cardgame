@@ -3,7 +3,7 @@ extends RefCounted
 
 
 const DEFAULT_SEED: int = 73103
-const SCHEMA_VERSION: int = 3
+const SCHEMA_VERSION: int = 4
 const REWARD_STAGES: Array[int] = [3, 5, 6]
 const EVENT_IDS: Array[StringName] = [
 	&"authorless_book", &"seventh_dock", &"calibration_station",
@@ -30,11 +30,16 @@ const SAVE_FIELDS: Array[String] = [
 	"next_battle_instability_threshold_delta", "next_battle_enemy_strength",
 	"next_battle_initial_draw_bonus", "next_battle_reward_relic_id", "fracture_damage_override",
 	"institution_relation", "event_history_hints_hidden", "event_history", "completed_battles",
-	"boss_ending_id", "boss_ending_text", "run_completed",
+	"boss_ending_id", "boss_ending_text", "run_completed", "unlock_tier",
+	"unlocked_reward_ids", "run_seen_reward_ids", "run_profile_id",
 ]
 
 var schema_version: int = SCHEMA_VERSION
 var seed_value: int = DEFAULT_SEED
+var unlock_tier: int = 0
+var unlocked_reward_ids: Array[StringName] = []
+var run_seen_reward_ids: Array[StringName] = []
+var run_profile_id: String = ""
 var map_graph: MapGraph = null
 var current_node_id: StringName = &""
 var visited_node_ids: Array[StringName] = []
@@ -55,8 +60,8 @@ var pending_reward_ids: Array[StringName] = []
 var selected_event_id: StringName = &""
 var event_resolved: bool = false
 var event_outcome: String = ""
-var player_max_hp: int = 70
-var player_hp: int = 70
+var player_max_hp: int = 80
+var player_hp: int = 80
 var next_battle_missing_name: int = 0
 var next_battle_instability_threshold_delta: int = 0
 var next_battle_enemy_strength: int = 0
@@ -81,9 +86,13 @@ var pending_node_resolution: Dictionary = {}
 var last_action_error: String = ""
 
 
-func start_run(p_seed: int = DEFAULT_SEED) -> void:
+func start_run(p_seed: int = DEFAULT_SEED, p_unlock_tier: int = 0) -> void:
 	schema_version = SCHEMA_VERSION
-	seed_value = p_seed
+	seed_value = maxi(1, p_seed)
+	unlock_tier = clampi(p_unlock_tier, 0, 3)
+	unlocked_reward_ids = MetaCatalog.get_unlocked_reward_ids(unlock_tier)
+	run_seen_reward_ids.clear()
+	run_profile_id = "%d-%d-%d" % [seed_value, int(Time.get_unix_time_from_system()), Time.get_ticks_usec()]
 	map_graph = MapGraph.new()
 	map_graph.generate(seed_value)
 	current_node_id = &""
@@ -102,8 +111,8 @@ func start_run(p_seed: int = DEFAULT_SEED) -> void:
 	selected_event_id = &""
 	event_resolved = false
 	event_outcome = ""
-	player_max_hp = 70
-	player_hp = 70
+	player_max_hp = 80
+	player_hp = 80
 	next_battle_missing_name = 0
 	next_battle_instability_threshold_delta = 0
 	next_battle_enemy_strength = 0
@@ -148,6 +157,10 @@ func to_save_dict() -> Dictionary:
 		})
 	return {
 		"seed_value": seed_value,
+		"unlock_tier": unlock_tier,
+		"unlocked_reward_ids": _string_name_array_to_strings(unlocked_reward_ids),
+		"run_seen_reward_ids": _string_name_array_to_strings(run_seen_reward_ids),
+		"run_profile_id": run_profile_id,
 		"current_node_id": str(current_node_id),
 		"visited_node_ids": _string_name_array_to_strings(visited_node_ids),
 		"available_node_ids": _string_name_array_to_strings(available_node_ids),
@@ -186,7 +199,8 @@ func load_from_save_dict(data: Dictionary) -> String:
 		if not data.has(field):
 			return "存档缺少字段：%s" % field
 	var integer_ranges: Dictionary = {
-		"seed_value": Vector2i(0, MAX_SAVE_INSTANCE_ID),
+		"seed_value": Vector2i(1, MAX_SAVE_INSTANCE_ID),
+		"unlock_tier": Vector2i(0, 3),
 		"current_node": Vector2i(0, 9),
 		"player_hp": Vector2i(0, MAX_SAVE_HP),
 		"player_max_hp": Vector2i(1, MAX_SAVE_HP),
@@ -211,7 +225,7 @@ func load_from_save_dict(data: Dictionary) -> String:
 			return "存档字段%s超出范围" % field
 	if int(data["player_hp"]) > int(data["player_max_hp"]):
 		return "当前生命不能大于最大生命"
-	for field: String in ["current_node_id", "next_battle_reward_relic_id", "boss_ending_id", "boss_ending_text"]:
+	for field: String in ["current_node_id", "next_battle_reward_relic_id", "boss_ending_id", "boss_ending_text", "run_profile_id"]:
 		if typeof(data[field]) != TYPE_STRING:
 			return "存档字段%s必须是字符串" % field
 	for field: String in ["event_history_hints_hidden", "run_completed"]:
@@ -220,12 +234,35 @@ func load_from_save_dict(data: Dictionary) -> String:
 	for field: String in [
 		"visited_node_ids", "available_node_ids", "deck_instances", "acquired_card_ids", "relics",
 		"evidence_records", "completed_node_ids", "revealed_node_ids", "event_history", "completed_battles",
+		"unlocked_reward_ids", "run_seen_reward_ids",
 	]:
 		if typeof(data[field]) != TYPE_ARRAY:
 			return "存档字段%s必须是数组" % field
 
+	var parsed_unlocked: Array[StringName] = []
+	for raw_card_id: Variant in data["unlocked_reward_ids"]:
+		if typeof(raw_card_id) != TYPE_STRING:
+			return "unlocked_reward_ids包含非字符串"
+		var unlocked_id: StringName = StringName(str(raw_card_id))
+		if not CardCatalog.REWARD_IDS.has(unlocked_id) or parsed_unlocked.has(unlocked_id):
+			return "unlocked_reward_ids包含未知或重复卡牌：%s" % unlocked_id
+		parsed_unlocked.append(unlocked_id)
+	var expected_unlocked: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(int(data["unlock_tier"]))
+	if not _same_string_name_set(parsed_unlocked, expected_unlocked):
+		return "unlocked_reward_ids与unlock_tier不一致"
+	var parsed_seen: Array[StringName] = []
+	for raw_card_id: Variant in data["run_seen_reward_ids"]:
+		if typeof(raw_card_id) != TYPE_STRING:
+			return "run_seen_reward_ids包含非字符串"
+		var seen_id: StringName = StringName(str(raw_card_id))
+		if not parsed_unlocked.has(seen_id) or parsed_seen.has(seen_id):
+			return "run_seen_reward_ids包含未解锁或重复卡牌：%s" % seen_id
+		parsed_seen.append(seen_id)
+	if str(data["run_profile_id"]).is_empty():
+		return "run_profile_id不能为空"
+
 	var candidate: RunModel = RunModel.new()
-	candidate.start_run(int(data["seed_value"]))
+	candidate.start_run(int(data["seed_value"]), int(data["unlock_tier"]))
 	var graph_errors: Array[String] = candidate.map_graph.validate()
 	if not graph_errors.is_empty():
 		return "地图校验失败：%s" % "; ".join(graph_errors)
@@ -383,6 +420,10 @@ func load_from_save_dict(data: Dictionary) -> String:
 	elif ending_id != &"" or not str(data["boss_ending_text"]).is_empty():
 		return "未完成远征不应包含Boss结算"
 
+	candidate.unlock_tier = int(data["unlock_tier"])
+	candidate.unlocked_reward_ids = parsed_unlocked
+	candidate.run_seen_reward_ids = parsed_seen
+	candidate.run_profile_id = str(data["run_profile_id"])
 	candidate.current_node_id = loaded_current_id
 	candidate.visited_node_ids = visited_ids
 	candidate.available_node_ids = available_ids
@@ -424,6 +465,10 @@ func load_from_save_dict(data: Dictionary) -> String:
 func _apply_loaded_candidate(candidate: RunModel) -> void:
 	schema_version = SCHEMA_VERSION
 	seed_value = candidate.seed_value
+	unlock_tier = candidate.unlock_tier
+	unlocked_reward_ids = candidate.unlocked_reward_ids.duplicate()
+	run_seen_reward_ids = candidate.run_seen_reward_ids.duplicate()
+	run_profile_id = candidate.run_profile_id
 	map_graph = candidate.map_graph
 	current_node_id = candidate.current_node_id
 	visited_node_ids = candidate.visited_node_ids.duplicate()
@@ -645,7 +690,9 @@ func enter_node(node_id: StringName) -> bool:
 	if node.node_type == MapNode.NodeType.EVENT:
 		begin_event()
 	elif node.node_type == MapNode.NodeType.SHOP:
-		pending_shop_stock = ShopCatalog.generate(node.content_seed, shop_remove_count, relics)
+		pending_shop_stock = ShopCatalog.generate(
+			node.content_seed, shop_remove_count, relics, unlocked_reward_ids, run_seen_reward_ids
+		)
 	return true
 
 
@@ -779,34 +826,87 @@ func generate_reward_choices(stage: int) -> Array[StringName]:
 	var node: MapNode = get_current_map_node()
 	var base_seed: int = node.content_seed if node != null else seed_value + stage * 1009
 	reward_rng.seed = base_seed + reward_round * 7919
-	var pool: Array[StringName] = _reward_pool_for_stage(stage)
+	var pool: Array[StringName] = unlocked_reward_ids.duplicate()
+	var dominant_tag: StringName = _dominant_deck_tag()
+	var synergy_pool: Array[StringName] = _cards_with_tag(pool, dominant_tag)
+	_append_weighted_reward(synergy_pool if not synergy_pool.is_empty() else pool, reward_rng)
+	var different_pool: Array[StringName] = []
+	for card_id: StringName in pool:
+		if pending_reward_ids.has(card_id):
+			continue
+		if dominant_tag == &"" or not CardCatalog.get_tags(card_id).has(dominant_tag):
+			different_pool.append(card_id)
+	_append_weighted_reward(different_pool if not different_pool.is_empty() else pool, reward_rng)
+	var general_rare_pool: Array[StringName] = []
 	var elite_reward: bool = node != null and node.node_type == MapNode.NodeType.ELITE
+	for card_id: StringName in pool:
+		if pending_reward_ids.has(card_id):
+			continue
+		var definition: Dictionary = CardCatalog.get_definition(card_id)
+		if str(definition.get(&"rarity", "")) == "罕见" or CardCatalog.get_tags(card_id).has(&"general"):
+			general_rare_pool.append(card_id)
 	if elite_reward:
-		var rare_pool: Array[StringName] = []
+		var rare_only: Array[StringName] = []
 		for card_id: StringName in pool:
-			if str(CardCatalog.get_definition(card_id).get(&"rarity", "")) == "罕见":
-				rare_pool.append(card_id)
-		if not rare_pool.is_empty():
-			var rare_id: StringName = rare_pool[reward_rng.randi_range(0, rare_pool.size() - 1)]
-			pending_reward_ids.append(rare_id)
-			pool.erase(rare_id)
-	while pending_reward_ids.size() < 3 and not pool.is_empty():
-		var pool_index: int = reward_rng.randi_range(0, pool.size() - 1)
-		pending_reward_ids.append(pool[pool_index])
-		pool.remove_at(pool_index)
+			if not pending_reward_ids.has(card_id) and str(CardCatalog.get_definition(card_id).get(&"rarity", "")) == "罕见":
+				rare_only.append(card_id)
+		if not rare_only.is_empty():
+			general_rare_pool = rare_only
+	_append_weighted_reward(general_rare_pool if not general_rare_pool.is_empty() else pool, reward_rng)
+	while pending_reward_ids.size() < mini(3, pool.size()):
+		_append_weighted_reward(pool, reward_rng)
+	for card_id: StringName in pending_reward_ids:
+		if not run_seen_reward_ids.has(card_id):
+			run_seen_reward_ids.append(card_id)
 	reward_round += 1
 	return pending_reward_ids.duplicate()
 
 
-func _reward_pool_for_stage(stage: int) -> Array[StringName]:
-	if stage <= 3:
-		return [&"broken_sentence", &"blank_space", &"rift_slash", &"forced_stability"]
-	if stage <= 5:
-		return [
-			&"broken_sentence", &"blank_space", &"unsigned_support", &"rift_slash",
-			&"forced_stability", &"delayed_guard", &"countdown_scar", &"restate", &"copied_guard",
-		]
-	return CardCatalog.REWARD_IDS.duplicate()
+func _reward_pool_for_stage(_stage: int) -> Array[StringName]:
+	return unlocked_reward_ids.duplicate()
+
+
+func _append_weighted_reward(candidates: Array[StringName], reward_rng: RandomNumberGenerator) -> void:
+	var weighted: Array[StringName] = []
+	for card_id: StringName in candidates:
+		if pending_reward_ids.has(card_id):
+			continue
+		var weight: int = 6
+		if run_seen_reward_ids.has(card_id):
+			weight = 2
+		if get_deck_card_ids().count(card_id) >= 2:
+			weight = 1
+		for copy_index: int in range(weight):
+			weighted.append(card_id)
+	if weighted.is_empty():
+		return
+	pending_reward_ids.append(weighted[reward_rng.randi_range(0, weighted.size() - 1)])
+
+
+func _dominant_deck_tag() -> StringName:
+	var counts: Dictionary = {}
+	for card_id: StringName in get_deck_card_ids():
+		for tag: StringName in CardCatalog.get_tags(card_id):
+			if tag != &"general":
+				counts[tag] = int(counts.get(tag, 0)) + 1
+	var best: StringName = &""
+	var best_count: int = 0
+	for raw_tag: Variant in counts.keys():
+		var tag: StringName = raw_tag as StringName
+		if int(counts[tag]) > best_count:
+			best = tag
+			best_count = int(counts[tag])
+	return best
+
+
+func _cards_with_tag(pool: Array[StringName], tag: StringName) -> Array[StringName]:
+	var result: Array[StringName] = []
+	if tag == &"":
+		return result
+	for card_id: StringName in pool:
+		if CardCatalog.get_tags(card_id).has(tag):
+			result.append(card_id)
+	return result
 
 
 func choose_reward(choice_index: int) -> bool:
@@ -926,6 +1026,33 @@ func resolve_rest_salvage() -> bool:
 	return mark_current_node_resolved()
 
 
+func resolve_rest_scavenge() -> bool:
+	last_action_error = ""
+	var node: MapNode = get_current_map_node()
+	if node == null or node.node_type != MapNode.NodeType.REST or bool(pending_node_resolution.get(&"resolved", false)):
+		last_action_error = "当前节点无法搜寻残页"
+		return false
+	var pool: Array[StringName] = unlocked_reward_ids.duplicate()
+	if pool.is_empty():
+		last_action_error = "当前没有可搜寻的残页"
+		return false
+	var scavenge_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	scavenge_rng.seed = node.content_seed + 4507
+	var candidates: Array[StringName] = _cards_with_tag(pool, _dominant_deck_tag())
+	if candidates.is_empty():
+		candidates = pool
+	var unseen: Array[StringName] = []
+	for card_id: StringName in candidates:
+		if not run_seen_reward_ids.has(card_id):
+			unseen.append(card_id)
+	var source: Array[StringName] = unseen if not unseen.is_empty() else candidates
+	var chosen: StringName = source[scavenge_rng.randi_range(0, source.size() - 1)]
+	add_card_instance(chosen)
+	if not run_seen_reward_ids.has(chosen):
+		run_seen_reward_ids.append(chosen)
+	return mark_current_node_resolved()
+
+
 func resolve_rest_upgrade(instance_id: int) -> bool:
 	var node: MapNode = get_current_map_node()
 	if node == null or node.node_type != MapNode.NodeType.REST or bool(pending_node_resolution.get(&"resolved", false)):
@@ -1036,7 +1163,10 @@ func get_event_options(event_id: StringName = selected_event_id) -> Array[Dictio
 	var options: Array[Dictionary] = []
 	match event_id:
 		&"authorless_book":
-			options.append(_option("照书中写的做", "失去 6 生命，可能降至 0；牌组加入《预写结局》。"))
+			options.append(_conditional_option(
+				"照书中写的做", "失去 6 生命，可能降至 0；牌组加入《预写结局》。",
+				unlocked_reward_ids.has(&"prewritten_ending"), "首次抵达删名者后解锁《预写结局》"
+			))
 			options.append(_option("撕掉下一页", "获得 60 墨晶；牌组加入 1 张《删节》。"))
 			options.append(_conditional_option("写下另一个名字", "获得证据“异名索引”；下一场战斗初始多抽 2 张牌。", relics.has(&"wordless_bookplate"), "需要遗物“无字藏书票”"))
 		&"seventh_dock":
@@ -1219,8 +1349,8 @@ func cancel_event_selection() -> bool:
 
 
 func get_summary_text() -> String:
-	var summary: String = "当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
-		current_node, _completed_node_count(), deck_instances.size(), ink_crystals,
+	var summary: String = "种子 %d｜U%d｜当前第%d层｜已完成节点 %d｜牌组 %d 张｜墨晶 %d｜证据 %d 条｜生命 %d/%d" % [
+		seed_value, unlock_tier, current_node, _completed_node_count(), deck_instances.size(), ink_crystals,
 		evidence.size(), player_hp, player_max_hp,
 	]
 	if run_completed:
@@ -1293,9 +1423,14 @@ func _basic_removal_candidates() -> Array[Dictionary]:
 
 
 func _deterministic_rare_card(seed_offset: int) -> StringName:
+	var pool: Array[StringName] = []
+	for card_id: StringName in unlocked_reward_ids:
+		if str(CardCatalog.get_definition(card_id).get(&"rarity", "")) == "罕见":
+			pool.append(card_id)
+	assert(not pool.is_empty(), "当前冻结卡池必须至少包含一张罕见牌")
 	var rare_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rare_rng.seed = seed_value + seed_offset
-	return RARE_REWARD_IDS[rare_rng.randi_range(0, RARE_REWARD_IDS.size() - 1)]
+	return pool[rare_rng.randi_range(0, pool.size() - 1)]
 
 
 func _prepare_elite_relic_reward(content_seed: int) -> void:

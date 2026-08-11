@@ -9,14 +9,19 @@ func _init() -> void:
 
 
 func _run() -> void:
-	var save_path: String = "user://broken_ring_ui_layout_test_%d.json" % OS.get_process_id()
+	var suffix: String = "%d" % OS.get_process_id()
+	var save_path: String = "user://broken_ring_ui_layout_test_%s.json" % suffix
+	var profile_path: String = "user://broken_ring_ui_layout_profile_test_%s.json" % suffix
 	var save_manager: SaveManager = SaveManager.new(save_path)
+	var profile_manager: ProfileManager = ProfileManager.new(profile_path)
 	save_manager.delete()
+	profile_manager.delete()
 	main = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	main.save_manager = save_manager
+	main.profile_manager = profile_manager
 	root.add_child(main)
 	await process_frame
-	main._restart_run()
+	main._start_new_run_with_seed(73103)
 	await process_frame
 	main._show_main_menu()
 	await process_frame

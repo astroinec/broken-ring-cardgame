@@ -25,7 +25,7 @@ M3 v1只允许在**节点完整结算并返回地图后**自动保存。
 ```json
 {
   "save_schema": 1,
-  "run_schema": 3,
+  "run_schema": 4,
   "saved_at_unix": 0,
   "run": {}
 }
@@ -40,6 +40,8 @@ Unix时间必须由运行时获得，仅用于显示，不参与规则。
 `run`必须包含：
 
 - `seed_value`
+- `run_profile_id` / `unlock_tier` / `unlocked_reward_ids`：本局冻结的局外解锁快照
+- `run_seen_reward_ids`：奖励与商店防重复状态
 - `current_node_id`
 - `visited_node_ids`
 - `available_node_ids`
@@ -69,7 +71,7 @@ Unix时间必须由运行时获得，仅用于显示，不参与规则。
 加载顺序：
 
 1. 解析JSON；
-2. 检查`save_schema == 1`、`run_schema == RunModel.SCHEMA_VERSION`；
+2. 检查`save_schema == 1`；`run_schema=4`直接加载，旧`run_schema=3`迁移为U3旧卡全开放并生成稳定远征标识；旧固定地图按已完成深度投影到同种子新版合法路径；
 3. 先以种子重新生成MapGraph；
 4. 校验所有节点ID、card_id、upgrade_id、relic_id和evidence_id；
 5. 校验牌组实例ID唯一且`next_deck_instance_id`大于所有已有ID；

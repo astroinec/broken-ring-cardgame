@@ -4,10 +4,14 @@ extends Control
 const CombatModelScript: Script = preload("res://scripts/core/combat_model.gd")
 const RunModelScript: Script = preload("res://scripts/core/run_model.gd")
 const SaveManagerScript: Script = preload("res://scripts/core/save_manager.gd")
+const ProfileManagerScript: Script = preload("res://scripts/core/profile_manager.gd")
 
 var model: CombatModel
 var run_model: RunModel
 var save_manager: SaveManager = SaveManagerScript.new()
+var profile_manager: ProfileManager = ProfileManagerScript.new()
+var last_profile_unlock_ids: Array[StringName] = []
+var last_profile_error: String = ""
 var last_save_error: String = ""
 var current_stage: int = CombatModel.TUTORIAL_STAGE_MIN
 var is_test_mode: bool = false
@@ -150,6 +154,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		&"deck", &"archive":
 			_show_map_screen()
+		&"profile_archive":
+			_show_main_menu()
 			get_viewport().set_input_as_handled()
 		&"shop_archive":
 			_show_shop_screen()
@@ -182,6 +188,32 @@ func _show_main_menu() -> void:
 	premise.add_theme_font_size_override("font_size", 21)
 	premise.add_theme_color_override("font_color", Color("d8e0e7"))
 	menu.add_child(premise)
+	var profile_info: Dictionary = profile_manager.inspect()
+	var profile: Dictionary = profile_info[&"profile"] as Dictionary
+	var profile_label: Label = Label.new()
+	profile_label.name = "ProfileStatus"
+	profile_label.text = "回收者档案｜远征 %d｜抵达Boss %d｜通关 %d｜U%d｜已解锁卡 %d\n下一条件：%s" % [
+		int(profile["runs_started"]), int(profile["boss_reached"]), int(profile["wins"]),
+		int(profile["unlock_tier"]), MetaCatalog.get_unlocked_reward_ids(int(profile["unlock_tier"])).size(),
+		MetaCatalog.next_unlock_condition(int(profile["unlock_tier"])),
+	]
+	var recent_unlock_names: Array[String] = []
+	for raw_card_id: Variant in profile.get("last_unlock_ids", []):
+		var recent_id: StringName = StringName(str(raw_card_id))
+		recent_unlock_names.append(str(CardCatalog.get_definition(recent_id).get(&"title", recent_id)))
+	profile_label.text += "\n最近解锁：%s" % ("无" if recent_unlock_names.is_empty() else "、".join(recent_unlock_names))
+	if not bool(profile_info[&"valid"]):
+		profile_label.text += "\n档案损坏：已安全降级为新档案，不影响开始远征。"
+		profile_label.tooltip_text = str(profile_info[&"error"])
+	profile_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	profile_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	profile_label.add_theme_color_override("font_color", Color("a9bdd0") if bool(profile_info[&"valid"]) else Color("e58c95"))
+	menu.add_child(profile_label)
+	var profile_button: Button = _configure_button(Button.new(), 44)
+	profile_button.name = "OpenProfileArchive"
+	profile_button.text = "查看卡牌图鉴"
+	profile_button.pressed.connect(_show_profile_archive)
+	menu.add_child(profile_button)
 	var save_info: Dictionary = save_manager.inspect()
 	if bool(save_info["exists"]):
 		var save_status: Label = Label.new()
@@ -209,6 +241,25 @@ func _show_main_menu() -> void:
 	start_button.text = "开始新远征（覆盖旧存档）" if bool(save_info["exists"]) else "进入无字之城"
 	start_button.pressed.connect(_restart_run)
 	menu.add_child(start_button)
+	var seed_row: HBoxContainer = HBoxContainer.new()
+	seed_row.name = "SeedReplayRow"
+	var seed_input: LineEdit = LineEdit.new()
+	seed_input.name = "SeedInput"
+	seed_input.placeholder_text = "输入正整数种子"
+	seed_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	seed_row.add_child(seed_input)
+	var seed_button: Button = _configure_button(Button.new(), 44)
+	seed_button.name = "SeedReplayButton"
+	seed_button.text = "使用种子复现"
+	seed_row.add_child(seed_button)
+	menu.add_child(seed_row)
+	var seed_error: Label = Label.new()
+	seed_error.name = "SeedInputError"
+	seed_error.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	seed_error.add_theme_color_override("font_color", Color("e58c95"))
+	menu.add_child(seed_error)
+	seed_button.pressed.connect(_start_seeded_run.bind(seed_input, seed_error))
+	seed_input.text_submitted.connect(_start_seeded_run_from_text.bind(seed_input, seed_error))
 	if bool(save_info["exists"]):
 		var delete_button: Button = _configure_button(Button.new(), 48)
 		delete_button.name = "DeleteSave"
@@ -230,9 +281,36 @@ func _show_main_menu() -> void:
 
 
 func _restart_run() -> void:
+	var seed_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	seed_rng.randomize()
+	_start_new_run_with_seed(seed_rng.randi_range(1, 2_147_483_647))
+
+
+func _start_seeded_run(seed_input: LineEdit, error_label: Label) -> void:
+	_start_seeded_run_from_text(seed_input.text, seed_input, error_label)
+
+
+func _start_seeded_run_from_text(text: String, _seed_input: LineEdit, error_label: Label) -> void:
+	var normalized: String = text.strip_edges()
+	if normalized.is_empty() or not normalized.is_valid_int():
+		error_label.text = "种子必须是正整数。"
+		return
+	var seed_value: int = normalized.to_int()
+	if seed_value <= 0 or seed_value > 2_147_483_647:
+		error_label.text = "种子必须在 1 到 2147483647 之间。"
+		return
+	error_label.text = ""
+	_start_new_run_with_seed(seed_value)
+
+
+func _start_new_run_with_seed(seed_value: int) -> void:
 	is_test_mode = false
+	var profile: Dictionary = profile_manager.load_profile()
 	run_model = RunModelScript.new()
-	run_model.start_run(RunModel.DEFAULT_SEED)
+	run_model.start_run(seed_value, int(profile.get("unlock_tier", 0)))
+	profile_manager.record_run_started(run_model.run_profile_id)
+	last_profile_error = profile_manager.last_error
+	last_profile_unlock_ids.clear()
 	current_stage = CombatModel.TUTORIAL_STAGE_MIN
 	_save_checkpoint()
 	_show_map_screen()
@@ -271,6 +349,11 @@ func _save_checkpoint() -> bool:
 func _complete_current_node_checkpoint() -> bool:
 	if not run_model.complete_current_node():
 		return false
+	if not run_model.run_completed:
+		profile_manager.record_run_progress(
+			run_model.run_profile_id, run_model.current_node, false, false, false, _visited_event_ids()
+		)
+		last_profile_error = profile_manager.last_error
 	if run_model.run_completed:
 		if not save_manager.delete():
 			last_save_error = save_manager.last_error
@@ -318,6 +401,8 @@ func _show_map_screen() -> void:
 	_add_profile_stat(stats, "证据", "%d 条" % run_model.evidence.size())
 	_add_profile_stat(stats, "当前层", "%d / 9" % run_model.current_node)
 	_add_profile_stat(stats, "已完成节点", "%d 个" % _completed_node_count())
+	_add_profile_stat(stats, "种子", str(run_model.seed_value))
+	_add_profile_stat(stats, "解锁层", "U%d" % run_model.unlock_tier)
 	var relics: Label = Label.new()
 	relics.text = "遗物：%s" % _relic_names()
 	relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -423,6 +508,46 @@ func _create_deck_instance_panel(instance: Dictionary) -> PanelContainer:
 	rules.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(rules)
 	return panel
+
+
+func _show_profile_archive() -> void:
+	ui_mode = &"profile_archive"
+	_clear_screen()
+	var profile: Dictionary = profile_manager.load_profile()
+	var unlocked: Array[StringName] = MetaCatalog.get_unlocked_reward_ids(int(profile.get("unlock_tier", 0)))
+	var archive_page: VBoxContainer = _create_page(
+		"回收者档案 / 卡牌图鉴",
+		"已解锁 %d / %d｜当前 U%d｜%s" % [unlocked.size(), CardCatalog.REWARD_IDS.size(), int(profile.get("unlock_tier", 0)), MetaCatalog.next_unlock_condition(int(profile.get("unlock_tier", 0)))]
+	)
+	var content: VBoxContainer = _add_page_scroll(archive_page, "ProfileCardArchive")
+	for card_id: StringName in CardCatalog.REWARD_IDS:
+		var panel: PanelContainer = PanelContainer.new()
+		panel.name = "ProfileCard_%s" % card_id
+		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		content.add_child(panel)
+		var label: Label = Label.new()
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if unlocked.has(card_id):
+			var definition: Dictionary = CardCatalog.get_definition(card_id)
+			var tags: Array[String] = []
+			for tag: StringName in CardCatalog.get_tags(card_id):
+				tags.append(str(tag))
+			label.text = "%s｜%s｜%s｜费用 %d\n%s\n标签：%s\n风味：%s" % [
+				definition[&"title"], CardData.type_display_name(int(definition[&"type"])), definition[&"rarity"],
+				int(definition[&"cost"]), definition[&"description"], "、".join(tags), definition[&"flavor"],
+			]
+			panel.add_theme_stylebox_override("panel", _panel_style(Color("1d2937"), Color("59748e"), 8))
+		else:
+			label.text = "未识别残页｜剪影\n解锁条件：%s" % MetaCatalog.unlock_condition_for_card(card_id)
+			label.add_theme_color_override("font_color", Color("77818c"))
+			panel.add_theme_stylebox_override("panel", _panel_style(Color("17191d"), Color("343a42"), 8))
+		panel.add_child(label)
+	var footer: HBoxContainer = _add_page_footer(archive_page)
+	var back: Button = _configure_button(Button.new())
+	back.text = "返回标题"
+	back.pressed.connect(_show_main_menu)
+	footer.add_child(back)
 
 
 func _show_archive_screen(section: StringName = &"relics") -> void:
@@ -544,6 +669,13 @@ func _on_map_node_pressed(node_id: StringName) -> void:
 		MapNode.NodeType.REST:
 			_show_rest_screen()
 		MapNode.NodeType.BOSS:
+			profile_manager.record_run_progress(run_model.run_profile_id, 9, true, false, false)
+			last_profile_error = profile_manager.last_error
+			if not last_profile_error.is_empty():
+				push_warning("局外档案保存失败：%s" % last_profile_error)
+			for card_id: StringName in profile_manager.last_new_unlock_ids:
+				if not last_profile_unlock_ids.has(card_id):
+					last_profile_unlock_ids.append(card_id)
 			_start_current_battle()
 
 
@@ -717,7 +849,7 @@ func _on_upgrade_skipped(mode: StringName) -> void:
 func _show_rest_screen() -> void:
 	ui_mode = &"rest"
 	_clear_screen()
-	var rest_page: VBoxContainer = _create_page("休整", "恢复生命、升级一张牌、回收墨晶，三者只能选择其一。")
+	var rest_page: VBoxContainer = _create_page("休整", "恢复生命、升级一张牌、搜寻残页或回收墨晶，四者只能选择其一。")
 	var options: VBoxContainer = _add_page_scroll(rest_page, "RestOptions")
 	options.alignment = BoxContainer.ALIGNMENT_CENTER
 	var heal_amount: int = maxi(1, floori(float(run_model.player_max_hp) * 0.2))
@@ -733,6 +865,12 @@ func _show_rest_screen() -> void:
 	upgrade.tooltip_text = "牌组中没有可升级的牌" if upgrade.disabled else ""
 	upgrade.pressed.connect(_show_rest_upgrade_screen)
 	options.add_child(upgrade)
+	var scavenge: Button = _configure_button(Button.new(), 64)
+	scavenge.name = "RestScavenge"
+	scavenge.text = "搜寻残页｜按当前构筑方向获得 1 张牌"
+	scavenge.tooltip_text = "从本局已解锁的卡池中获得一张贴合当前构筑的牌，优先给出本局尚未出现过的牌。"
+	scavenge.pressed.connect(_on_rest_scavenge_pressed)
+	options.add_child(scavenge)
 	var salvage: Button = _configure_button(Button.new(), 64)
 	salvage.text = "回收残页｜获得 %d 墨晶（放弃本次恢复或升级）" % RunModel.REST_SALVAGE_INCOME
 	salvage.pressed.connect(_on_rest_salvage_pressed)
@@ -746,6 +884,11 @@ func _show_rest_screen() -> void:
 
 func _on_rest_heal_pressed() -> void:
 	if run_model.resolve_rest_heal():
+		_complete_node_and_return_to_map()
+
+
+func _on_rest_scavenge_pressed() -> void:
+	if run_model.resolve_rest_scavenge():
 		_complete_node_and_return_to_map()
 
 
@@ -803,8 +946,18 @@ func _on_boss_terminal_choice(option_id: StringName) -> void:
 		_show_main_menu()
 		return
 	run_model.player_hp = model.player_hp
-	if run_model.record_boss_outcome(model.boss_terminal_choice, model.boss_recovery_count) and _complete_current_node_checkpoint():
-		_show_expedition_complete_screen()
+	if run_model.record_boss_outcome(model.boss_terminal_choice, model.boss_recovery_count):
+		profile_manager.record_run_progress(
+			run_model.run_profile_id, 9, false, true, model.boss_terminal_choice == &"read_original"
+		)
+		last_profile_error = profile_manager.last_error
+		if not last_profile_error.is_empty():
+			push_warning("局外档案保存失败：%s" % last_profile_error)
+		for card_id: StringName in profile_manager.last_new_unlock_ids:
+			if not last_profile_unlock_ids.has(card_id):
+				last_profile_unlock_ids.append(card_id)
+		if _complete_current_node_checkpoint():
+			_show_expedition_complete_screen()
 
 
 func _show_expedition_complete_screen() -> void:
@@ -833,6 +986,22 @@ func _show_expedition_complete_screen() -> void:
 	relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	relics.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(relics)
+	var unlocks: Label = Label.new()
+	unlocks.name = "NewProfileUnlocks"
+	if not last_profile_error.is_empty():
+		unlocks.text = "局外档案保存失败，本局解锁尚未写入磁盘。请返回标题后重试。"
+		unlocks.tooltip_text = last_profile_error
+	elif last_profile_unlock_ids.is_empty():
+		unlocks.text = "本局没有触发新的卡牌解锁。"
+	else:
+		var unlock_names: Array[String] = []
+		for card_id: StringName in last_profile_unlock_ids:
+			unlock_names.append(str(CardCatalog.get_definition(card_id).get(&"title", card_id)))
+		unlocks.text = "本局新解锁卡牌：%s" % "、".join(unlock_names)
+	unlocks.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	unlocks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	unlocks.add_theme_color_override("font_color", Color("ffd27d"))
+	content.add_child(unlocks)
 	var footer: HBoxContainer = _add_page_footer(complete_page)
 	var back: Button = _configure_button(Button.new())
 	back.text = "返回标题"
@@ -1136,9 +1305,8 @@ func _refresh_combat() -> void:
 
 
 func _has_playable_hand_card() -> bool:
-	for card: CardData in model.hand:
-		var unplayable: bool = card.card_type == CardData.CardType.STATUS and card.base_cost >= 99
-		if not unplayable and model.get_card_cost(card) <= model.energy:
+	for index: int in range(model.hand.size()):
+		if model.can_play_card(index):
 			return true
 	return false
 
@@ -1169,6 +1337,8 @@ func _build_hand_row() -> void:
 			unavailable_reason = "状态牌不可主动打出"
 		elif cost > model.energy:
 			unavailable_reason = "稳定度不足：需要%d，当前%d" % [cost, model.energy]
+		elif not model.can_play_card(index):
+			unavailable_reason = "当前没有这张牌需要的合法目标"
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.tooltip_text = "%s
 
@@ -1482,6 +1652,15 @@ func _upgraded_card_count() -> int:
 		if instance.get(&"upgrade_id", &"") != &"":
 			count += 1
 	return count
+
+
+func _visited_event_ids() -> Array[StringName]:
+	var result: Array[StringName] = []
+	for node_id: StringName in run_model.visited_node_ids:
+		var node: MapNode = run_model.map_graph.get_node(node_id)
+		if node != null and node.node_type == MapNode.NodeType.EVENT and node.event_id != &"" and not result.has(node.event_id):
+			result.append(node.event_id)
+	return result
 
 
 func _completed_node_count() -> int:

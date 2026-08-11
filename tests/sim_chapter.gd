@@ -178,10 +178,9 @@ func _run_combat(run: RunModel, enemy_id: StringName, battle_seed: int, boss: bo
 				model.resolve_pending_selection(targets[0])
 			continue
 		var card_index: int = _choose_card(model)
-		if card_index >= 0:
-			model.play_card(card_index)
-		else:
-			model.end_player_turn()
+		if card_index >= 0 and model.play_card(card_index):
+			continue
+		model.end_player_turn()
 	return {
 		&"won": model.battle_over and model.victory,
 		&"turns": model.turn_number,
@@ -197,9 +196,7 @@ func _choose_card(model: CombatModel) -> int:
 	var best_score: int = -1_000_000
 	for index: int in range(model.hand.size()):
 		var card: CardData = model.hand[index]
-		if card.card_type == CardData.CardType.STATUS and card.base_cost >= 99:
-			continue
-		if model.get_card_cost(card) > model.energy:
+		if not model.can_play_card(index):
 			continue
 		var score: int = 10 - model.get_card_cost(card)
 		var effective_type: int = model.get_card_effective_type(card)

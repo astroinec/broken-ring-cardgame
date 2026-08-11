@@ -3,8 +3,8 @@ extends RefCounted
 
 
 const STARTER_IDS: Array[StringName] = [
-	&"calibration_strike", &"calibration_strike", &"calibration_strike", &"calibration_strike",
-	&"temporary_guard", &"temporary_guard", &"temporary_guard", &"temporary_guard",
+	&"calibration_strike", &"calibration_strike",
+	&"temporary_guard", &"temporary_guard", &"temporary_guard",
 	&"boundary_read", &"aftershock",
 ]
 
@@ -24,6 +24,12 @@ const REWARD_IDS: Array[StringName] = [
 	&"restate",
 	&"copied_guard",
 	&"homophone",
+	&"reverse_index",
+	&"delete_redundancy",
+	&"missing_name_arbitration",
+	&"tenth_answer",
+	&"echo_chamber",
+	&"borrowed_name_execution",
 ]
 
 const DEFINITIONS: Dictionary = {
@@ -49,78 +55,108 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"broken_sentence": {
 		&"title": "断句", &"type": CardData.CardType.ATTACK, &"cost": 1,
-		&"description": "造成 7 点伤害。若这是本回合打出的第一张牌，抽 1 张牌。", &"rarity": "普通",
+		&"description": "造成 7 点伤害。若这是本回合打出的第一张牌，抽 1 张牌。", &"rarity": "普通", &"tags": [&"general", &"deck_control"],
 		&"flavor": "判决在句号抵达前就已执行。",
 	},
 	&"blank_space": {
 		&"title": "留白", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "获得 7 点格挡。若本回合尚未打出攻式，再获得 3 点格挡。", &"rarity": "普通",
+		&"description": "获得 7 点格挡。若本回合尚未打出攻式，再获得 3 点格挡。", &"rarity": "普通", &"tags": [&"general"],
 		&"flavor": "空白不是缺失。空白是被允许留下的部分。",
 	},
 	&"index_reorder": {
 		&"title": "索引重排", &"type": CardData.CardType.LAW, &"cost": 0,
-		&"description": "查看抽牌堆顶 3 张，选择 1 张置入弃牌堆，其余顺序不变。消逝。", &"rarity": "普通", &"exhausts": true,
+		&"description": "查看抽牌堆顶 3 张，选择 1 张置入弃牌堆，其余顺序不变。消逝。", &"rarity": "普通", &"exhausts": true, &"tags": [&"deck_control"],
 		&"flavor": "目录比正文多出一位作者。",
 	},
 	&"unsigned_support": {
 		&"title": "未署名的援护", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "获得 6 点格挡。若本回合有牌从封存区解封，再获得 5 点格挡。", &"rarity": "普通",
+		&"description": "获得 6 点格挡。若本回合有牌从封存区解封，再获得 5 点格挡。", &"rarity": "普通", &"tags": [&"seal"],
 		&"flavor": "有人替你签过字。档案里没有那个人。",
 	},
 	&"rift_slash": {
 		&"title": "裂隙挥击", &"type": CardData.CardType.ATTACK, &"cost": 1,
-		&"description": "造成 11 点伤害；超载 2。", &"rarity": "普通",
+		&"description": "造成 11 点伤害；超载 2。", &"rarity": "普通", &"tags": [&"overload"],
 		&"flavor": "裂口没有出现在刀上。它先出现在目标的名字里。",
 	},
 	&"forced_stability": {
 		&"title": "强制稳定", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "移除最多 3 点不稳定；每实际移除 1 点，获得 2 点格挡。", &"rarity": "普通",
+		&"description": "移除最多 3 点不稳定；每实际移除 1 点，获得 2 点格挡。", &"rarity": "普通", &"tags": [&"overload", &"general"],
 		&"flavor": "校准不是治疗，只是暂时压住扩散的裂纹。",
 	},
 	&"critical_permission": {
 		&"title": "临界许可", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "本回合下一次裂解伤害变为 0；抽 1 张牌。消逝。", &"rarity": "罕见", &"exhausts": true,
+		&"description": "本回合下一次裂解伤害变为 0；抽 1 张牌。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"overload", &"general"],
 		&"flavor": "许可签发时间：事故发生后三小时。",
 	},
 	&"dissolution_protocol": {
 		&"title": "崩解协议", &"type": CardData.CardType.ATTACK, &"cost": 2,
-		&"description": "造成 14 点伤害；每有 1 点不稳定，额外造成 2 点伤害；随后不稳定清零。消逝。", &"rarity": "罕见", &"exhausts": true,
+		&"description": "造成 14 点伤害；每有 1 点不稳定，额外造成 2 点伤害；随后不稳定清零。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"overload"],
 		&"flavor": "协议最后一行：载体无需回收。",
 	},
 	&"delayed_guard": {
 		&"title": "延迟防线", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "封存 1。解封：获得 12 点格挡。", &"rarity": "普通",
+		&"description": "封存 1。解封：获得 12 点格挡。", &"rarity": "普通", &"tags": [&"seal"],
 		&"flavor": "城墙建成时，战争已经结束了。",
 	},
 	&"countdown_scar": {
 		&"title": "倒计刻痕", &"type": CardData.CardType.ATTACK, &"cost": 1,
-		&"description": "封存 2。解封：对生命最低的敌人造成 18 点伤害。", &"rarity": "普通",
+		&"description": "封存 2。解封：对生命最低的敌人造成 18 点伤害。", &"rarity": "普通", &"tags": [&"seal"],
 		&"flavor": "每一道刻痕都在等同一个明天。",
 	},
 	&"prewritten_ending": {
 		&"title": "预写结局", &"type": CardData.CardType.LAW, &"cost": 2,
-		&"description": "选择手牌中 1 张非消逝牌，生成其复制品并封存 1；原牌本回合费用变为 0。消逝。", &"rarity": "罕见", &"exhausts": true,
+		&"description": "选择手牌中 1 张非消逝牌，生成其复制品并封存 1；原牌本回合费用变为 0。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"seal", &"deck_control"],
 		&"flavor": "结局早已写好，你只是把它提前翻到这一页。",
 	},
 	&"unseal_order": {
 		&"title": "开封令", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "选择 1 张封存牌，其倒计时立即归零并触发解封；超载 2。", &"rarity": "罕见",
+		&"description": "选择 1 张封存牌，其倒计时立即归零并触发解封；超载 2。", &"rarity": "罕见", &"tags": [&"seal", &"overload"],
 		&"flavor": "命令来自尚未成立的终末机构。",
 	},
 	&"restate": {
 		&"title": "复述", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "回响上一张攻式的 60% 伤害。", &"rarity": "普通",
+		&"description": "回响上一张攻式的 60% 伤害。", &"rarity": "普通", &"tags": [&"echo"],
 		&"flavor": "第二个声音与第一个完全相同，连那次颤抖也没有遗漏。",
 	},
 	&"copied_guard": {
 		&"title": "复写护式", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "获得 4 点格挡；回响上一张守式 50% 的格挡效果。", &"rarity": "普通",
+		&"description": "获得 4 点格挡；回响上一张守式 50% 的格挡效果。", &"rarity": "普通", &"tags": [&"echo"],
 		&"flavor": "抄本比原件早三十七年入库。",
 	},
 	&"homophone": {
 		&"title": "同音异义", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "复制紧邻上一张费用不高于 1 的非临时、非消逝牌。复制品本回合费用为 0，打出后消逝。超载 1。", &"rarity": "罕见",
+		&"description": "复制紧邻上一张费用不高于 1 的非临时、非消逝牌。复制品本回合费用为 0，打出后消逝。超载 1。", &"rarity": "罕见", &"tags": [&"echo", &"overload"],
 		&"flavor": "此地称你为“载律者”，另一个纪元却用同样的读音称呼死刑犯。",
+	},
+	&"reverse_index": {
+		&"title": "反向索引", &"type": CardData.CardType.LAW, &"cost": 1,
+		&"description": "从弃牌堆选择 1 张非状态牌加入手牌。消逝。", &"rarity": "普通", &"exhausts": true, &"tags": [&"deck_control"],
+		&"flavor": "被划去的条目仍知道自己原来位于哪一页。",
+	},
+	&"delete_redundancy": {
+		&"title": "删去冗句", &"type": CardData.CardType.LAW, &"cost": 0,
+		&"description": "选择手牌中另一张牌并使其消逝；抽 2 张牌。消逝。", &"rarity": "普通", &"exhausts": true, &"tags": [&"deck_control"],
+		&"flavor": "精简后的句子，恰好少了一个活人。",
+	},
+	&"missing_name_arbitration": {
+		&"title": "缺名仲裁", &"type": CardData.CardType.DEFENSE, &"cost": 1,
+		&"description": "清除全部缺名；每清除 1 层获得 4 点格挡；若至少清除 1 层，抽 1 张牌。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"missing_name", &"general"],
+		&"flavor": "裁决没有归还名字，只确认缺失本身有效。",
+	},
+	&"tenth_answer": {
+		&"title": "第十种答案", &"type": CardData.CardType.ATTACK, &"cost": 2,
+		&"description": "造成 8 点伤害；封存区每有 1 张牌，额外造成 4 点伤害；随后所有封存牌倒计时减少 1。", &"rarity": "罕见", &"tags": [&"seal"],
+		&"flavor": "前九种答案互相否定，第十种决定保留提问者。",
+	},
+	&"echo_chamber": {
+		&"title": "回声室", &"type": CardData.CardType.LAW, &"cost": 1,
+		&"description": "抽 1 张牌；本回合下一次成功回响的数值额外提高 50%。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"echo", &"deck_control"],
+		&"flavor": "房间没有出口，只有越来越像你的第二个声音。",
+	},
+	&"borrowed_name_execution": {
+		&"title": "借名执行", &"type": CardData.CardType.ATTACK, &"cost": 1,
+		&"description": "造成 5 点伤害；每存在一种缺名，额外造成 3 点伤害；随后每种缺名各清除 1 层。", &"rarity": "普通", &"tags": [&"missing_name"],
+		&"flavor": "执行令上的名字全是借来的，只有伤口属于你。",
 	},
 	&"redaction": {
 		&"title": "删节", &"type": CardData.CardType.STATUS, &"cost": 99,
@@ -149,6 +185,13 @@ static func has_card(card_id: StringName) -> bool:
 static func get_definition(card_id: StringName) -> Dictionary:
 	var definition: Dictionary = DEFINITIONS.get(card_id, {})
 	return definition.duplicate(true)
+
+
+static func get_tags(card_id: StringName) -> Array[StringName]:
+	var result: Array[StringName] = []
+	for raw_tag: Variant in DEFINITIONS.get(card_id, {}).get(&"tags", []):
+		result.append(raw_tag as StringName)
+	return result
 
 
 static func create_card(

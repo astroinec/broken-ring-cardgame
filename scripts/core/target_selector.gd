@@ -15,6 +15,7 @@ enum Kind {
 	HAND_CARD,         ## 手牌中某张牌（预写结局）
 	SEALED_CARD,       ## 封存区某张牌（开封令）
 	DRAW_PILE_TOP,     ## 抽牌堆顶若干张中的一张（索引重排）
+	DISCARD_CARD,      ## 弃牌堆中的一张牌（反向索引）
 }
 
 enum Filter {
@@ -47,6 +48,8 @@ static func describe(kind: Kind) -> String:
 			return "封存区的一张牌"
 		Kind.DRAW_PILE_TOP:
 			return "抽牌堆顶的一张牌"
+		Kind.DISCARD_CARD:
+			return "弃牌堆中的一张牌"
 	return "未知目标"
 
 
@@ -92,6 +95,10 @@ static func candidate_indices(
 				var index: int = pile_size - 1 - offset
 				if _passes_filter(context.draw_pile[index], filter):
 					indices.append(index)
+		Kind.DISCARD_CARD:
+			for index: int in range(context.discard_pile.size()):
+				if _passes_filter(context.discard_pile[index], filter):
+					indices.append(index)
 		Kind.SINGLE_ENEMY, Kind.LOWEST_HP_ENEMY:
 			for index: int in range(context.enemy_count()):
 				if context.enemy_hps[index] > 0:
@@ -124,6 +131,10 @@ static func label_for(kind: Kind, context: TargetContext, index: int) -> String:
 				return "无效牌堆位置"
 			var depth: int = context.draw_pile.size() - index
 			return "第%d张 %s" % [depth, _card_label(context.draw_pile[index])]
+		Kind.DISCARD_CARD:
+			if index < 0 or index >= context.discard_pile.size():
+				return "无效弃牌"
+			return _card_label(context.discard_pile[index])
 		Kind.SINGLE_ENEMY, Kind.LOWEST_HP_ENEMY:
 			if index < 0 or index >= context.enemy_count():
 				return "无效敌人"

@@ -108,6 +108,7 @@ var cards_played_this_turn: int = 0
 var attack_played_this_turn: bool = false
 var card_unsealed_this_turn: bool = false
 var prevent_next_fracture_damage: bool = false
+var next_echo_bonus_percent: int = 0
 
 ## 待选择请求。非 null 时战斗被挂起，只接受解析或取消两种输入。
 var pending_selection: PendingSelection = null
@@ -171,6 +172,7 @@ func start_battle(
 	attack_played_this_turn = false
 	card_unsealed_this_turn = false
 	prevent_next_fracture_damage = false
+	next_echo_bonus_percent = 0
 	last_card_id = &""
 	last_card_upgrade_id = &""
 	last_card_base_cost = -1
@@ -243,6 +245,7 @@ func get_enemy_total_block(index: int = 0) -> int:
 func build_target_context() -> TargetContext:
 	var context: TargetContext = TargetContext.new()
 	context.hand = hand
+	context.discard_pile = discard_pile
 	context.sealed_zone = sealed_zone
 	context.draw_pile = draw_pile
 	for index: int in range(get_enemy_count()):
@@ -286,6 +289,20 @@ func get_next_tutorial_stage() -> int:
 
 # ---------------------------------------------------------------------- 出牌流程
 
+func can_play_card(hand_index: int) -> bool:
+	if battle_over or boss_terminal_choice_pending or pending_selection != null:
+		return false
+	if hand_index < 0 or hand_index >= hand.size():
+		return false
+	var card: CardData = hand[hand_index]
+	if card.card_type == CardData.CardType.STATUS and card.base_cost >= 99:
+		return false
+	if energy < get_card_cost(card):
+		return false
+	var effects: Array[CardEffect] = _filter_deleted_keyword_effects(card, _generate_card_effects(card), false)
+	return _has_required_choice_targets(card, effects)
+
+
 func play_card(hand_index: int) -> bool:
 	if battle_over or boss_terminal_choice_pending or pending_selection != null:
 		return false
@@ -300,6 +317,10 @@ func play_card(hand_index: int) -> bool:
 	if energy < cost:
 		_log("稳定度不足，无法打出《%s》。" % card.title)
 		return false
+	var prepared_effects: Array[CardEffect] = _filter_deleted_keyword_effects(card, _generate_card_effects(card))
+	if not _has_required_choice_targets(card, prepared_effects):
+		_log("《%s》当前没有合法目标，无法打出。" % card.title)
+		return false
 
 	energy -= cost
 	_play_paid_cost = cost
@@ -312,7 +333,7 @@ func play_card(hand_index: int) -> bool:
 
 	_play_card = card
 	_play_hand_index = hand_index
-	_play_effects = _filter_deleted_keyword_effects(card, _generate_card_effects(card))
+	_play_effects = prepared_effects
 	if _play_effects.is_empty() and not get_card_keywords(card).is_empty():
 		_log("《%s》的关键词已删除；基础正文为空。" % card.title)
 	_play_effect_index = 0
@@ -388,6 +409,23 @@ func get_pending_candidate_labels() -> Array[String]:
 	)
 
 
+func _has_required_choice_targets(card: CardData, effects: Array[CardEffect]) -> bool:
+	for effect: CardEffect in effects:
+		if not effect.requires_player_choice():
+			continue
+		if effect.kind == CardEffect.Kind.EXHAUST_HAND_CARD:
+			# 出牌后来源会离开手牌，因此必须现在就有至少一张其他牌。
+			if hand.size() <= 1:
+				return false
+			continue
+		var candidates: Array[int] = TargetSelector.candidate_indices(
+			effect.target_kind, build_target_context(), effect.target_filter, effect.target_scope
+		)
+		if candidates.is_empty():
+			return false
+	return true
+
+
 func _run_effect_loop() -> bool:
 	while _play_effect_index < _play_effects.size():
 		var effect: CardEffect = _play_effects[_play_effect_index]
@@ -457,10 +495,11 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 			_play_card_was_sealed = true
 		CardEffect.Kind.ECHO_ATTACK:
 			if last_card_type == CardData.CardType.ATTACK:
-				var echoed_damage: int = floori(float(last_damage_snapshot) * float(effect.amount) / 100.0)
+				var echo_bonus: int = _consume_echo_chamber_percent()
+				var echoed_damage: int = floori(float(last_damage_snapshot) * float(effect.amount) / 100.0 * float(100 + echo_bonus) / 100.0)
 				var baseline_percent: int = effect.amount if base_effect == null else base_effect.amount
 				var baseline_echo_damage: int = floori(float(last_damage_snapshot) * float(baseline_percent) / 100.0)
-				_log("回响上一张攻式已结算伤害的 %d%%：%d。" % [effect.amount, echoed_damage])
+				_log("回响上一张攻式已结算伤害的 %d%%：%d%s。" % [effect.amount, echoed_damage, "（回声室 +%d%%）" % echo_bonus if echo_bonus > 0 else ""])
 				# 回响沿用原目标；原目标已死亡时改为指向生命最低的敌人。
 				var echo_target: int = TargetSelector.resolve_enemy(
 					TargetSelector.Kind.LOWEST_HP_ENEMY, build_target_context()
@@ -475,7 +514,8 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 				_log("回响失败：紧邻上一张牌不是攻式。")
 		CardEffect.Kind.ECHO_BLOCK:
 			if last_card_type == CardData.CardType.DEFENSE:
-				var echoed_block: int = floori(float(last_block_snapshot) * float(effect.amount) / 100.0)
+				var echo_bonus: int = _consume_echo_chamber_percent()
+				var echoed_block: int = floori(float(last_block_snapshot) * float(effect.amount) / 100.0 * float(100 + echo_bonus) / 100.0)
 				var baseline_percent: int = effect.amount if base_effect == null else base_effect.amount
 				var baseline_echo_block: int = floori(float(last_block_snapshot) * float(baseline_percent) / 100.0)
 				_play_resolved_block += _gain_player_block(
@@ -505,6 +545,53 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 			_log("崩解协议将不稳定清零。")
 		CardEffect.Kind.COPY_PREVIOUS:
 			_copy_previous_card_to_hand()
+		CardEffect.Kind.CLEAR_MISSING_NAMES:
+			var cleared: int = _missing_name_total()
+			missing_name.clear()
+			if cleared > 0:
+				var base_block_per_stack: int = effect.amount if base_effect == null else base_effect.amount
+				var gained: int = _gain_player_block(
+					cleared * effect.amount, card.title, true,
+					cleared * base_block_per_stack, card.upgrade_id != &""
+				)
+				_play_resolved_block += gained
+				draw_cards(1, false)
+				_log("缺名仲裁：清除 %d 层缺名，获得 %d 格挡并抽 1 张牌。" % [cleared, gained])
+			else:
+				_log("缺名仲裁：当前没有缺名可清除。")
+		CardEffect.Kind.SEALED_BURST:
+			var sealed_count: int = sealed_zone.size()
+			var burst_damage: int = effect.amount + sealed_count * effect.factor
+			var base_burst_amount: int = effect.amount if base_effect == null else base_effect.amount
+			var base_burst_factor: int = effect.factor if base_effect == null else base_effect.factor
+			var baseline_burst_damage: int = base_burst_amount + sealed_count * base_burst_factor
+			var burst_target: int = TargetSelector.resolve_enemy(TargetSelector.Kind.SINGLE_ENEMY, build_target_context())
+			_play_resolved_damage += _deal_damage_to_enemy(
+				burst_damage, get_card_effective_type(card), card.title, burst_target,
+				baseline_burst_damage, card.upgrade_id != &""
+			)
+			for sealed_card: CardData in sealed_zone:
+				sealed_card.sealed_turns -= 1
+			_log("第十种答案：按 %d 张封存牌结算 %d 伤害；倒计时各 -1，留待下一封存窗口解封。" % [sealed_count, burst_damage])
+		CardEffect.Kind.BOOST_NEXT_ECHO:
+			next_echo_bonus_percent = effect.amount
+			_log("回声室：本回合下一次成功回响额外提高 %d%%。" % effect.amount)
+		CardEffect.Kind.MISSING_KIND_ATTACK:
+			var kind_count: int = _missing_name_kind_count()
+			var execution_damage: int = effect.amount + kind_count * effect.factor
+			var base_execution_amount: int = effect.amount if base_effect == null else base_effect.amount
+			var base_execution_factor: int = effect.factor if base_effect == null else base_effect.factor
+			var baseline_execution_damage: int = base_execution_amount + kind_count * base_execution_factor
+			var execution_target: int = TargetSelector.resolve_enemy(TargetSelector.Kind.SINGLE_ENEMY, build_target_context())
+			_play_resolved_damage += _deal_damage_to_enemy(
+				execution_damage, get_card_effective_type(card), card.title, execution_target,
+				baseline_execution_damage, card.upgrade_id != &""
+			)
+			for card_type: int in [CardData.CardType.ATTACK, CardData.CardType.DEFENSE, CardData.CardType.LAW]:
+				var stacks: int = int(missing_name.get(card_type, 0))
+				if stacks > 0:
+					missing_name[card_type] = stacks - 1
+			_log("借名执行：按 %d 种缺名结算 %d 伤害，并各清除 1 层。" % [kind_count, execution_damage])
 
 
 func _apply_chosen_effect(effect: CardEffect, target_index: int) -> void:
@@ -527,6 +614,18 @@ func _apply_chosen_effect(effect: CardEffect, target_index: int) -> void:
 			chosen.sealed_turns = 0
 			_log("开封令：选择《%s》，倒计时归零。" % chosen.title)
 			_unseal_card_at(target_index)
+		CardEffect.Kind.RETURN_DISCARD_TO_HAND:
+			var returned: CardData = discard_pile[target_index]
+			discard_pile.remove_at(target_index)
+			if effect.amount < 0:
+				returned.cost_override_this_turn = maxi(0, returned.base_cost + effect.amount)
+			hand.append(returned)
+			_log("反向索引：将《%s》加入手牌%s。" % [returned.title, "，本回合费用降至 %d" % returned.cost_override_this_turn if effect.amount < 0 else ""])
+		CardEffect.Kind.EXHAUST_HAND_CARD:
+			var removed: CardData = hand[target_index]
+			hand.remove_at(target_index)
+			exhausted_zone.append(removed)
+			_log("删去冗句：选择《%s》进入消逝区。" % removed.title)
 		_:
 			push_error("效果 %d 声明了玩家选择目标，但缺少选择结算实现。" % effect.kind)
 			_log("《%s》的选择效果未实现。" % card.title)
@@ -699,7 +798,7 @@ func get_card_keywords(card: CardData) -> Array[StringName]:
 		&"delayed_guard", &"countdown_scar", &"prewritten_ending":
 			keywords.append(&"封存")
 	match card.id:
-		&"restate", &"copied_guard":
+		&"restate", &"copied_guard", &"echo_chamber":
 			keywords.append(&"回响")
 	if card.exhausts:
 		keywords.append(&"消逝")
@@ -991,6 +1090,20 @@ func _missing_name_total() -> int:
 	return total
 
 
+func _missing_name_kind_count() -> int:
+	var count: int = 0
+	for card_type: int in [CardData.CardType.ATTACK, CardData.CardType.DEFENSE, CardData.CardType.LAW]:
+		if int(missing_name.get(card_type, 0)) > 0:
+			count += 1
+	return count
+
+
+func _consume_echo_chamber_percent() -> int:
+	var bonus: int = next_echo_bonus_percent
+	next_echo_bonus_percent = 0
+	return bonus
+
+
 func _track_boss_type_sequence(card_type: int) -> void:
 	if not is_name_eraser_battle() or boss_phase != 1:
 		return
@@ -1161,6 +1274,7 @@ func _start_player_turn() -> void:
 	attack_played_this_turn = false
 	card_unsealed_this_turn = false
 	prevent_next_fracture_damage = false
+	next_echo_bonus_percent = 0
 	extra_draws_this_turn = 0
 	binding_triggered_this_turn = false
 	stone_shell_broken_this_turn = false
@@ -1303,6 +1417,28 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 			var copy_overload: int = card.value(&"overload", 1)
 			if copy_overload > 0:
 				effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, copy_overload))
+		&"reverse_index":
+			effects.append(
+				CardEffect.new(CardEffect.Kind.RETURN_DISCARD_TO_HAND, card.value(&"returned_cost_delta", 0)).with_target(
+					TargetSelector.Kind.DISCARD_CARD, "选择加入手牌的非状态牌", TargetSelector.Filter.PLAYABLE
+				)
+			)
+		&"delete_redundancy":
+			effects.append(
+				CardEffect.new(CardEffect.Kind.EXHAUST_HAND_CARD, 1).with_target(
+					TargetSelector.Kind.HAND_CARD, "选择另一张牌使其消逝"
+				)
+			)
+			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, card.value(&"draw", 2)))
+		&"missing_name_arbitration":
+			effects.append(CardEffect.new(CardEffect.Kind.CLEAR_MISSING_NAMES, card.value(&"block_per_stack", 4)))
+		&"tenth_answer":
+			effects.append(CardEffect.new(CardEffect.Kind.SEALED_BURST, 8, card.value(&"damage_per_sealed", 4)))
+		&"echo_chamber":
+			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, 1))
+			effects.append(CardEffect.new(CardEffect.Kind.BOOST_NEXT_ECHO, card.value(&"echo_bonus_percent", 50)))
+		&"borrowed_name_execution":
+			effects.append(CardEffect.new(CardEffect.Kind.MISSING_KIND_ATTACK, 5, card.value(&"damage_per_kind", 3)))
 	return effects
 
 
@@ -1316,7 +1452,7 @@ func _base_effect_for_current_index(card: CardData) -> CardEffect:
 	return base_effects[_play_effect_index]
 
 
-func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect]) -> Array[CardEffect]:
+func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect], write_log: bool = true) -> Array[CardEffect]:
 	if not boss_deleted_keywords.has(card.instance_id):
 		return effects
 	var filtered: Array[CardEffect] = []
@@ -1327,10 +1463,11 @@ func _filter_deleted_keyword_effects(card: CardData, effects: Array[CardEffect])
 				keyword = &"超载"
 			CardEffect.Kind.SEAL_CARD, CardEffect.Kind.PREWRITE_COPY:
 				keyword = &"封存"
-			CardEffect.Kind.ECHO_ATTACK, CardEffect.Kind.ECHO_BLOCK:
+			CardEffect.Kind.ECHO_ATTACK, CardEffect.Kind.ECHO_BLOCK, CardEffect.Kind.BOOST_NEXT_ECHO:
 				keyword = &"回响"
 		if keyword != &"" and not is_card_keyword_active(card, keyword):
-			_log("《%s》的关键词“%s”已删除，附加效果不结算。" % [card.title, keyword])
+			if write_log:
+				_log("《%s》的关键词“%s”已删除，附加效果不结算。" % [card.title, keyword])
 			continue
 		filtered.append(effect)
 	return filtered
