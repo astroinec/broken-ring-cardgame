@@ -77,7 +77,7 @@ func _test_echo_snapshot() -> void:
 	var hp_before: int = model.enemy_hp
 	_expect(model.play_card(0), "echo setup attack can be played")
 	_expect(model.play_card(0), "restate can be played after attack")
-	_expect(model.enemy_hp == hp_before - 9, "restate echoes sixty percent of resolved attack damage")
+	_expect(model.enemy_hp == hp_before - 13, "restate deals its base damage plus sixty percent echo")
 
 
 func _test_sealed_card_returns() -> void:
@@ -87,7 +87,7 @@ func _test_sealed_card_returns() -> void:
 	_expect(model.play_card(0), "delayed guard can be sealed")
 	_expect(model.sealed_zone.size() == 1, "delayed guard enters sealed zone")
 	model.end_player_turn()
-	_expect(model.player_block == 12, "delayed guard grants block after unsealing")
+	_expect(model.player_block == 9, "delayed guard grants block after unsealing")
 	_expect(_find_hand_card(model, &"delayed_guard") >= 0, "unsealed card returns to hand")
 
 
@@ -184,7 +184,7 @@ func _test_reward_card_rules() -> void:
 	_prepare_hand(defense_echo, [&"temporary_guard", &"copied_guard"])
 	_expect(defense_echo.play_card(0), "temporary guard sets defense echo snapshot")
 	_expect(defense_echo.play_card(0), "copied guard can be played")
-	_expect(defense_echo.player_block == 11, "copied guard adds four plus half prior block")
+	_expect(defense_echo.player_block == 13, "copied guard adds five plus sixty percent prior block")
 
 	var homophone = CombatModelScript.new()
 	var homophone_bonus: Array[StringName] = [&"homophone"]
@@ -536,9 +536,9 @@ func _test_relics_in_pipeline() -> void:
 	stabilizer.start_battle(84001, 6, stabilizer_bonus, &"", stabilizer_relics)
 	_prepare_hand(stabilizer, [&"rift_slash", &"boundary_read"])
 	_expect(stabilizer.play_card(0), "rift slash can be played with the stabilizer")
-	_expect(stabilizer.instability == 1, "crack stabilizer removes one point from the first overload")
+	_expect(stabilizer.instability == 2, "crack stabilizer removes one point from the first overload")
 	_expect(stabilizer.play_card(0), "boundary read can be played next")
-	_expect(stabilizer.instability == 3, "crack stabilizer only affects the first overload")
+	_expect(stabilizer.instability == 4, "crack stabilizer only affects the first overload")
 
 	var without = CombatModelScript.new()
 	var no_relic: Array[StringName] = []
@@ -546,7 +546,7 @@ func _test_relics_in_pipeline() -> void:
 	without.start_battle(84001, 6, no_bonus, &"", no_relic)
 	_prepare_hand(without, [&"rift_slash"])
 	without.play_card(0)
-	_expect(without.instability == 2, "without the stabilizer the first overload is unchanged")
+	_expect(without.instability == 3, "without the stabilizer the first overload is unchanged")
 
 	# 无字藏书票：每场战斗第一次打出律式后抽 1 张。
 	var bookplate = CombatModelScript.new()

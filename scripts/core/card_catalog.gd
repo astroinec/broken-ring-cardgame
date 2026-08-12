@@ -44,7 +44,7 @@ const DEFINITIONS: Dictionary = {
 		&"flavor": "它只能保护你到下一次校准。",
 	},
 	&"boundary_read": {
-		&"title": "越界读取", &"type": CardData.CardType.LAW, &"cost": 1,
+		&"title": "越界读取", &"type": CardData.CardType.LAW, &"cost": 0,
 		&"description": "抽 2 张牌；超载 2。", &"rarity": "基础",
 		&"flavor": "文件拒绝访问。你却记得里面的内容。",
 	},
@@ -75,12 +75,12 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"rift_slash": {
 		&"title": "裂隙挥击", &"type": CardData.CardType.ATTACK, &"cost": 1,
-		&"description": "造成 11 点伤害；超载 2。", &"rarity": "普通", &"tags": [&"overload"],
+		&"description": "造成 10 点伤害；超载 3。", &"rarity": "普通", &"tags": [&"overload"],
 		&"flavor": "裂口没有出现在刀上。它先出现在目标的名字里。",
 	},
 	&"forced_stability": {
 		&"title": "强制稳定", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "移除最多 3 点不稳定；每实际移除 1 点，获得 2 点格挡。", &"rarity": "普通", &"tags": [&"overload", &"general"],
+		&"description": "获得 4 点格挡；移除最多 3 点不稳定，每实际移除 1 点再获得 2 点格挡。", &"rarity": "普通", &"tags": [&"overload", &"general"],
 		&"flavor": "校准不是治疗，只是暂时压住扩散的裂纹。",
 	},
 	&"critical_permission": {
@@ -95,12 +95,12 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"delayed_guard": {
 		&"title": "延迟防线", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "封存 1。解封：获得 12 点格挡。", &"rarity": "普通", &"tags": [&"seal"],
+		&"description": "封存 1。解封：获得 9 点格挡。", &"rarity": "普通", &"tags": [&"seal"],
 		&"flavor": "城墙建成时，战争已经结束了。",
 	},
 	&"countdown_scar": {
 		&"title": "倒计刻痕", &"type": CardData.CardType.ATTACK, &"cost": 1,
-		&"description": "封存 2。解封：对生命最低的敌人造成 18 点伤害。", &"rarity": "普通", &"tags": [&"seal"],
+		&"description": "封存 2。解封：对生命最低的敌人造成 14 点伤害。", &"rarity": "普通", &"tags": [&"seal"],
 		&"flavor": "每一道刻痕都在等同一个明天。",
 	},
 	&"prewritten_ending": {
@@ -109,18 +109,18 @@ const DEFINITIONS: Dictionary = {
 		&"flavor": "结局早已写好，你只是把它提前翻到这一页。",
 	},
 	&"unseal_order": {
-		&"title": "开封令", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "选择 1 张封存牌，其倒计时立即归零并触发解封；超载 2。", &"rarity": "罕见", &"tags": [&"seal", &"overload"],
+		&"title": "开封令", &"type": CardData.CardType.LAW, &"cost": 0,
+		&"description": "选择 1 张封存牌，其倒计时立即归零并触发解封。", &"rarity": "罕见", &"tags": [&"seal"],
 		&"flavor": "命令来自尚未成立的终末机构。",
 	},
 	&"restate": {
 		&"title": "复述", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "回响上一张攻式的 60% 伤害。", &"rarity": "普通", &"tags": [&"echo"],
+		&"description": "造成 4 点伤害；再回响上一张攻式的 60% 伤害。", &"rarity": "普通", &"tags": [&"echo"],
 		&"flavor": "第二个声音与第一个完全相同，连那次颤抖也没有遗漏。",
 	},
 	&"copied_guard": {
 		&"title": "复写护式", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "获得 4 点格挡；回响上一张守式 50% 的格挡效果。", &"rarity": "普通", &"tags": [&"echo"],
+		&"description": "获得 5 点格挡；回响上一张守式 60% 的格挡效果。", &"rarity": "普通", &"tags": [&"echo"],
 		&"flavor": "抄本比原件早三十七年入库。",
 	},
 	&"homophone": {
@@ -140,17 +140,17 @@ const DEFINITIONS: Dictionary = {
 	},
 	&"missing_name_arbitration": {
 		&"title": "缺名仲裁", &"type": CardData.CardType.DEFENSE, &"cost": 1,
-		&"description": "清除全部缺名；每清除 1 层获得 4 点格挡；若至少清除 1 层，抽 1 张牌。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"missing_name", &"general"],
+		&"description": "获得 5 点格挡；清除全部缺名，每清除 1 层再获得 4 点格挡；若至少清除 1 层，抽 1 张牌。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"missing_name", &"general"],
 		&"flavor": "裁决没有归还名字，只确认缺失本身有效。",
 	},
 	&"tenth_answer": {
-		&"title": "第十种答案", &"type": CardData.CardType.ATTACK, &"cost": 2,
-		&"description": "造成 8 点伤害；封存区每有 1 张牌，额外造成 4 点伤害；随后所有封存牌倒计时减少 1。", &"rarity": "罕见", &"tags": [&"seal"],
+		&"title": "第十种答案", &"type": CardData.CardType.ATTACK, &"cost": 1,
+		&"description": "造成 6 点伤害；封存区每有 1 张牌，额外造成 5 点伤害；随后所有封存牌倒计时减少 1。", &"rarity": "罕见", &"tags": [&"seal"],
 		&"flavor": "前九种答案互相否定，第十种决定保留提问者。",
 	},
 	&"echo_chamber": {
-		&"title": "回声室", &"type": CardData.CardType.LAW, &"cost": 1,
-		&"description": "抽 1 张牌；本回合下一次成功回响的数值额外提高 50%。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"echo", &"deck_control"],
+		&"title": "回声室", &"type": CardData.CardType.LAW, &"cost": 0,
+		&"description": "抽 1 张牌；本回合下一次成功回响的数值额外提高 100%。消逝。", &"rarity": "罕见", &"exhausts": true, &"tags": [&"echo", &"deck_control"],
 		&"flavor": "房间没有出口，只有越来越像你的第二个声音。",
 	},
 	&"borrowed_name_execution": {

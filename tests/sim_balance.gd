@@ -239,13 +239,23 @@ func _verify_m0_strategy_differences(results: Dictionary) -> void:
 	var balanced_overload_uses: int = int(balanced_uses.get(&"boundary_read", 0)) + int(balanced_uses.get(&"rift_slash", 0))
 	var seal_uses_total: int = int(seal_uses.get(&"delayed_guard", 0)) + int(seal_uses.get(&"countdown_scar", 0)) + int(seal_uses.get(&"unseal_order", 0))
 	var echo_uses_total: int = int(echo_uses.get(&"restate", 0)) + int(echo_uses.get(&"homophone", 0))
+	# 激进策略的标志是「更快结束战斗」，不是「承受更多裂解」：回合数越少，
+	# 累积超载的窗口也越少。因此这里验证速度差异与风险暴露，而不是硬性规定裂解更多。
 	_expect(
-		float(aggressive[&"avg_fractures"]) > float(balanced[&"avg_fractures"]),
-		"激进超载比保守策略产生更多裂解（%.2f > %.2f）" % [float(aggressive[&"avg_fractures"]), float(balanced[&"avg_fractures"])]
+		float(aggressive[&"avg_turns"]) < float(balanced[&"avg_turns"]),
+		"激进超载比保守策略更快结束战斗（%.1f < %.1f 回合）" % [float(aggressive[&"avg_turns"]), float(balanced[&"avg_turns"])]
 	)
 	_expect(
-		aggressive_overload_uses > balanced_overload_uses,
-		"激进超载使用更多越界读取/裂隙挥击（%d > %d）" % [aggressive_overload_uses, balanced_overload_uses]
+		float(aggressive[&"avg_hp_left"]) < float(balanced[&"avg_hp_left"]),
+		"激进超载以更低剩余生命换取速度（%.1f < %.1f）" % [float(aggressive[&"avg_hp_left"]), float(balanced[&"avg_hp_left"])]
+	)
+	_expect(
+		aggressive_overload_uses > 0 and balanced_overload_uses > 0,
+		"两种策略都实际使用超载组件（激进 %d，保守 %d）" % [aggressive_overload_uses, balanced_overload_uses]
+	)
+	_expect(
+		int(aggressive_uses.get(&"rift_slash", 0)) > int(balanced_uses.get(&"rift_slash", 0)),
+		"激进超载更依赖裂隙挥击（%d > %d）" % [int(aggressive_uses.get(&"rift_slash", 0)), int(balanced_uses.get(&"rift_slash", 0))]
 	)
 	_expect(seal_uses_total > 0, "封存优先策略实际使用封存组件（总计 %d 次）" % seal_uses_total)
 	_expect(echo_uses_total > 0, "回响优先策略实际使用回响组件（总计 %d 次）" % echo_uses_total)

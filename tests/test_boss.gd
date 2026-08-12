@@ -63,8 +63,8 @@ func _test_phase_transition_after_full_card_resolution() -> void:
 	model.enemy_hp = 105
 	_prepare_hand(model, [&"rift_slash"])
 	_expect(model.play_card(0), "threshold-crossing card resolves")
-	_expect(model.enemy_hp == 94, "threshold-crossing damage is applied")
-	_expect(model.instability == 2, "the card's post-damage overload resolves before transition")
+	_expect(model.enemy_hp == 95, "threshold-crossing damage is applied")
+	_expect(model.instability == 3, "the card's post-damage overload resolves before transition")
 	_expect(model.boss_phase == 2 and not model.boss_transition_pending, "Boss transitions after the complete effect queue")
 	_expect(model.enemy_block == 0 and model.boss_cost_edits.is_empty(), "transition clears block and all cost edits")
 	_expect(model.enemy_intent_index == 0 and model.get_enemy_intent_text().contains("删除类别"), "phase two starts from its first intent")
@@ -111,7 +111,7 @@ func _test_keyword_deletion_and_fracture_recovery() -> void:
 	_expect(not model.is_card_keyword_active(card, &"超载"), "deleted overload keyword is inactive")
 	var hp_before: int = model.enemy_hp
 	_expect(model.play_card(0), "keyword-deleted card remains playable")
-	_expect(model.enemy_hp == hp_before - 11, "keyword deletion preserves base damage")
+	_expect(model.enemy_hp == hp_before - 10, "keyword deletion preserves base damage")
 	_expect(model.instability == 0, "keyword deletion suppresses only the overload effect")
 	model.instability = CombatModel.INSTABILITY_THRESHOLD
 	var recoveries_before: int = model.boss_recovery_count

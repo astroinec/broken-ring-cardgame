@@ -123,7 +123,7 @@ func _test_missing_name_arbitration() -> void:
 	base.missing_name[CardData.CardType.LAW] = 1
 	_expect(base.play_card(0), "缺名仲裁可打出")
 	_expect(base.missing_name.is_empty(), "缺名仲裁清除全部缺名")
-	_expect(base.player_block == 12 and base.hand.size() == 1, "基础缺名仲裁每层四格挡且有清除时抽一张")
+	_expect(base.player_block == 17 and base.hand.size() == 1, "基础缺名仲裁五点保底加每层四格挡且有清除时抽一张")
 
 	var upgraded: CombatModel = _model()
 	_set_hand(upgraded, [&"missing_name_arbitration"], [&"missing_name_arbitration_plus"])
@@ -131,13 +131,13 @@ func _test_missing_name_arbitration() -> void:
 	upgraded.missing_name[CardData.CardType.ATTACK] = 2
 	upgraded.missing_name[CardData.CardType.LAW] = 1
 	upgraded.play_card(0)
-	_expect(upgraded.player_block == 15 and upgraded.missing_name.is_empty(), "升级缺名仲裁每层五格挡并清空")
+	_expect(upgraded.player_block == 23 and upgraded.missing_name.is_empty(), "升级缺名仲裁每层六格挡并清空")
 
 	var none: CombatModel = _model()
 	_set_hand(none, [&"missing_name_arbitration"])
 	_set_draw(none, [&"calibration_strike"])
 	none.play_card(0)
-	_expect(none.player_block == 0 and none.hand.is_empty() and none.draw_pile.size() == 1, "没有缺名时仲裁不格挡也不抽牌")
+	_expect(none.player_block == 5 and none.hand.is_empty() and none.draw_pile.size() == 1, "没有缺名时仲裁仍给五点保底但不抽牌")
 
 
 func _test_tenth_answer() -> void:
@@ -146,7 +146,7 @@ func _test_tenth_answer() -> void:
 	_set_sealed(base, [&"delayed_guard", &"countdown_scar"], [2, 3])
 	var hp_before: int = base.enemy_hp
 	base.play_card(0)
-	_expect(base.enemy_hp == hp_before - 16, "基础第十种答案按两张封存牌造成十六伤害")
+	_expect(base.enemy_hp == hp_before - 16, "基础第十种答案按两张封存牌造成十六伤害（6+5×2）")
 	_expect(_sealed_turns(base) == [1, 2], "第十种答案令全部封存倒计时减一")
 
 	var upgraded: CombatModel = _model()
@@ -154,7 +154,7 @@ func _test_tenth_answer() -> void:
 	_set_sealed(upgraded, [&"delayed_guard", &"countdown_scar"], [2, 3])
 	hp_before = upgraded.enemy_hp
 	upgraded.play_card(0)
-	_expect(upgraded.enemy_hp == hp_before - 20, "升级第十种答案每张封存牌追加六伤害")
+	_expect(upgraded.enemy_hp == hp_before - 20, "升级第十种答案每张封存牌追加七伤害（6+7×2）")
 	_expect(_sealed_turns(upgraded) == [1, 2], "升级版同样只推进一次倒计时")
 
 
@@ -165,13 +165,13 @@ func _test_echo_chamber() -> void:
 	base.energy = 20
 	var hp_before: int = base.enemy_hp
 	base.play_card(_find_hand(base, &"echo_chamber"))
-	_expect(base.next_echo_bonus_percent == 50, "基础回声室准备百分之五十放大")
+	_expect(base.next_echo_bonus_percent == 100, "基础回声室准备百分之百放大")
 	base.play_card(_find_hand(base, &"calibration_strike"))
 	base.play_card(_find_hand(base, &"restate"))
-	_expect(base.enemy_hp == hp_before - 11 and base.next_echo_bonus_percent == 0, "回声室只放大下一次成功回响并随即消耗")
+	_expect(base.enemy_hp == hp_before - 17 and base.next_echo_bonus_percent == 0, "回声室只放大下一次成功回响并随即消耗")
 	base.play_card(_find_hand(base, &"calibration_strike"))
 	base.play_card(_find_hand(base, &"restate"))
-	_expect(base.enemy_hp == hp_before - 20, "同回合第二次回响恢复普通数值")
+	_expect(base.enemy_hp == hp_before - 30, "同回合第二次回响恢复普通数值")
 
 	var upgraded: CombatModel = _model()
 	_set_hand(upgraded, [&"echo_chamber", &"calibration_strike", &"restate"], [&"echo_chamber_plus", &"", &""])
@@ -181,13 +181,13 @@ func _test_echo_chamber() -> void:
 	upgraded.play_card(0)
 	upgraded.play_card(_find_hand(upgraded, &"calibration_strike"))
 	upgraded.play_card(_find_hand(upgraded, &"restate"))
-	_expect(upgraded.enemy_hp == hp_before - 12, "升级回声室以百分之七十五放大一次回响")
+	_expect(upgraded.enemy_hp == hp_before - 19, "升级回声室以百分之一百五十放大一次回响")
 
 	var cleared: CombatModel = _model()
 	_set_hand(cleared, [&"echo_chamber"])
 	_set_draw(cleared, [&"temporary_guard"])
 	cleared.play_card(0)
-	_expect(cleared.next_echo_bonus_percent == 50, "回合结束前回声室增益存在")
+	_expect(cleared.next_echo_bonus_percent == 100, "回合结束前回声室增益存在")
 	cleared.end_player_turn()
 	_expect(cleared.next_echo_bonus_percent == 0, "未使用的回声室增益在新回合清除")
 
@@ -217,14 +217,14 @@ func _test_new_upgrades_trigger_red_pen() -> void:
 	_set_hand(arbitration, [&"missing_name_arbitration"], [&"missing_name_arbitration_plus"])
 	arbitration.missing_name[CardData.CardType.ATTACK] = 1
 	arbitration.play_card(0)
-	_expect(arbitration.player_block == 8, "升级缺名仲裁触发红笔并在五格挡上追加三点")
+	_expect(arbitration.player_block == 14, "升级缺名仲裁触发红笔并在每层六格挡上追加三点")
 
 	var tenth: CombatModel = _model_with_relic(&"calibrator_red_pen")
 	_set_hand(tenth, [&"tenth_answer"], [&"tenth_answer_plus"])
 	_set_sealed(tenth, [&"delayed_guard"], [2])
 	var hp_before: int = tenth.enemy_hp
 	tenth.play_card(0)
-	_expect(tenth.enemy_hp == hp_before - 17, "升级第十种答案以未升级基线触发红笔")
+	_expect(tenth.enemy_hp == hp_before - 16, "升级第十种答案以未升级基线触发红笔")
 
 	var borrowed: CombatModel = _model_with_relic(&"calibrator_red_pen")
 	_set_hand(borrowed, [&"borrowed_name_execution"], [&"borrowed_name_execution_plus"])

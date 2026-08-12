@@ -122,6 +122,8 @@ var _play_effect_index: int = 0
 var _play_hand_index: int = 0
 var _play_paid_cost: int = 0
 var _play_missing_name_refund_type: int = -1
+## 打出当前牌之前的缺名种类数，供《借名执行》等按缺名结算的效果读取。
+var _play_missing_kind_snapshot: int = 0
 var _play_resolved_damage: int = 0
 var _play_resolved_block: int = 0
 var _play_card_was_sealed: bool = false
@@ -324,6 +326,9 @@ func play_card(hand_index: int) -> bool:
 
 	energy -= cost
 	_play_paid_cost = cost
+	# 缺名种类必须在扣除本次费用缺名之前快照：否则《借名执行》作为攻式，
+	# 会先消耗掉攻式缺名，导致它永远看不到自己本该计入的那一层。
+	_play_missing_kind_snapshot = _missing_name_kind_count()
 	_play_missing_name_refund_type = -1
 	if effective_type >= 0 and int(missing_name.get(effective_type, 0)) > 0:
 		_play_missing_name_refund_type = effective_type
@@ -577,7 +582,7 @@ func _apply_automatic_effect(effect: CardEffect) -> void:
 			next_echo_bonus_percent = effect.amount
 			_log("回声室：本回合下一次成功回响额外提高 %d%%。" % effect.amount)
 		CardEffect.Kind.MISSING_KIND_ATTACK:
-			var kind_count: int = _missing_name_kind_count()
+			var kind_count: int = maxi(_missing_name_kind_count(), _play_missing_kind_snapshot)
 			var execution_damage: int = effect.amount + kind_count * effect.factor
 			var base_execution_amount: int = effect.amount if base_effect == null else base_effect.amount
 			var base_execution_factor: int = effect.factor if base_effect == null else base_effect.factor
@@ -1326,14 +1331,14 @@ func _unseal_card_at(index: int) -> void:
 	match card.id:
 		&"delayed_guard":
 			var gained: int = _gain_player_block(
-				card.value(&"unseal_block", 12), card.title, false, 12, card.upgrade_id != &""
+				card.value(&"unseal_block", 9), card.title, false, 9, card.upgrade_id != &""
 			)
 			_log("解封效果：获得 %d 格挡。" % gained)
 		&"countdown_scar":
 			var target: int = TargetSelector.resolve_enemy(
 				TargetSelector.Kind.LOWEST_HP_ENEMY, build_target_context()
 			)
-			_deal_damage_to_enemy(card.value(&"unseal_damage", 18), CardData.CardType.ATTACK, card.title, target)
+			_deal_damage_to_enemy(card.value(&"unseal_damage", 14), CardData.CardType.ATTACK, card.title, target)
 	if hand.size() < MAX_HAND_SIZE:
 		hand.append(card)
 		_log("《%s》返回手牌。" % card.title)
@@ -1378,9 +1383,10 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 			if card_unsealed_this_turn:
 				effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, 5))
 		&"rift_slash":
-			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"damage", 11)))
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, card.value(&"overload", 2)))
+			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"damage", 10)))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, card.value(&"overload", 3)))
 		&"forced_stability":
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 4)))
 			effects.append(CardEffect.new(CardEffect.Kind.REDUCE_INSTABILITY, 3, card.value(&"block_per_instability", 2)))
 		&"critical_permission":
 			effects.append(CardEffect.new(CardEffect.Kind.PREVENT_FRACTURE, 1))
@@ -1404,14 +1410,15 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 					TargetSelector.Kind.SEALED_CARD, "选择立即解封的封存牌"
 				)
 			)
-			var unseal_overload: int = card.value(&"overload", 2)
-			if unseal_overload > 0:
-				effects.append(CardEffect.new(CardEffect.Kind.GAIN_INSTABILITY, unseal_overload))
+			var unseal_draw: int = card.value(&"draw", 0)
+			if unseal_draw > 0:
+				effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, unseal_draw))
 		&"restate":
+			effects.append(CardEffect.new(CardEffect.Kind.DAMAGE_ENEMY, card.value(&"base_damage", 4)))
 			effects.append(CardEffect.new(CardEffect.Kind.ECHO_ATTACK, card.value(&"echo_percent", 60)))
 		&"copied_guard":
-			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 4)))
-			effects.append(CardEffect.new(CardEffect.Kind.ECHO_BLOCK, 50))
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 5)))
+			effects.append(CardEffect.new(CardEffect.Kind.ECHO_BLOCK, card.value(&"echo_percent", 60)))
 		&"homophone":
 			effects.append(CardEffect.new(CardEffect.Kind.COPY_PREVIOUS, 1))
 			var copy_overload: int = card.value(&"overload", 1)
@@ -1431,12 +1438,13 @@ func _generate_card_effects(card: CardData) -> Array[CardEffect]:
 			)
 			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, card.value(&"draw", 2)))
 		&"missing_name_arbitration":
+			effects.append(CardEffect.new(CardEffect.Kind.GAIN_BLOCK, card.value(&"base_block", 5)))
 			effects.append(CardEffect.new(CardEffect.Kind.CLEAR_MISSING_NAMES, card.value(&"block_per_stack", 4)))
 		&"tenth_answer":
-			effects.append(CardEffect.new(CardEffect.Kind.SEALED_BURST, 8, card.value(&"damage_per_sealed", 4)))
+			effects.append(CardEffect.new(CardEffect.Kind.SEALED_BURST, 6, card.value(&"damage_per_sealed", 5)))
 		&"echo_chamber":
 			effects.append(CardEffect.new(CardEffect.Kind.DRAW_CARDS, 1))
-			effects.append(CardEffect.new(CardEffect.Kind.BOOST_NEXT_ECHO, card.value(&"echo_bonus_percent", 50)))
+			effects.append(CardEffect.new(CardEffect.Kind.BOOST_NEXT_ECHO, card.value(&"echo_bonus_percent", 100)))
 		&"borrowed_name_execution":
 			effects.append(CardEffect.new(CardEffect.Kind.MISSING_KIND_ATTACK, 5, card.value(&"damage_per_kind", 3)))
 	return effects

@@ -113,6 +113,7 @@ v1远征存档默认写入 `user://broken_ring_run_v1.json`。只保存战斗外
 
 1. `docs/ROADMAP.md`：项目阶段、依赖顺序、里程碑验收门槛与范围边界
 2. `docs/BALANCE_AND_CONTRIBUTING.md`：数值口径、已定案决策、当前失衡疑点，以及**不要顺手改掉**的东西
+3. `docs/CARD_COSTING_PRINCIPLES.md`：卡牌定价基线与十条判据；改动任何卡牌数值前必读，并用 `tests/audit_card_value.gd` 实测
 
 只看代码容易改错方向：很多数字是刻意选的，很多缺口是刻意留的。
 
